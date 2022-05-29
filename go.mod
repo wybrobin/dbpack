@@ -16,7 +16,6 @@ require (
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang-module/carbon v1.6.6
 	github.com/golang/mock v1.6.0
-	github.com/golang/protobuf v1.5.2
 	github.com/google/go-cmp v0.5.7
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/patrickmn/go-cache v2.1.0+incompatible
@@ -38,7 +37,7 @@ require (
 	golang.org/x/net v0.0.0-20220225172249-27dd8689420f
 	golang.org/x/text v0.3.7
 	google.golang.org/grpc v1.40.0
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
+	gopkg.in/yaml.v3 v3.0.0
 	k8s.io/client-go v0.23.5
 	vimagination.zapto.org/byteio v1.0.1
 )
@@ -54,4 +53,5 @@ require (
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 // indirect
 	golang.org/x/sys v0.0.0-20220519141025-dcacdad47464 // indirect
 	golang.org/x/tools v0.1.10 // indirect
+	google.golang.org/protobuf v1.27.1
 )
