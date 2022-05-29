@@ -184,13 +184,13 @@ func (f *_mysqlFilter) processBeforeDelete(ctx context.Context, conn *driver.Bac
 	executor := &deleteExecutor{
 		conn: conn,
 		stmt: deleteStmt,
-		args: stmt.BindVars,
+		args: stmt.BindVars,	//绑定的参数，也就是会替换?的参数
 	}
 	bi, err := executor.BeforeImage(ctx)
 	if err != nil {
 		return err
 	}
-	if !proto.WithVariable(ctx, beforeImage, bi) {
+	if !proto.WithVariable(ctx, beforeImage, bi) {	//这里是用context里的keyVariableMap{}作为key传递的map进行传值的，map是引用，不然用context传不到上一层
 		return errors.New("set before image failed")
 	}
 	return nil

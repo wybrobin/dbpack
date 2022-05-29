@@ -44,6 +44,7 @@ func (f *_httpFilter) handleHttp1GlobalBegin(ctx *fasthttp.RequestCtx, transacti
 	return true, nil
 }
 
+//ctx.Response.StatusCode 非200，就回滚
 func (f *_httpFilter) handleHttp1GlobalEnd(ctx *fasthttp.RequestCtx) error {
 	xidParam := ctx.UserValue(XID)
 	xid := xidParam.(string)

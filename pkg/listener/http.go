@@ -92,16 +92,19 @@ func NewHttpListener(conf *config.Listener) (proto.Listener, error) {
 func (l *HttpListener) Listen() {
 	log.Infof("start http listener %s", l.listener.Addr())
 	if err := fasthttp.Serve(l.listener, func(ctx *fasthttp.RequestCtx) {
-		if err := l.doPreFilter(ctx); err != nil {
+		//这个也就是作为http服务的代理，转发请求前做的事情
+		if err := l.doPreFilter(ctx); err != nil {	//调用 HttpDistributedTransaction 的 PreHandle 方法
 			log.Error(err)
 			return
 		}
-		request := &fasthttp.Request{}
-		ctx.Request.CopyTo(request)
-		request.SetHost(l.conf.BackendHost)
+		request := &fasthttp.Request{}	//创建新的request
+		ctx.Request.CopyTo(request)	//将旧的request拷贝到新的里面
+		request.SetHost(l.conf.BackendHost)	//设置新的请求地址
+		//这里才真正调用被代理的http服务，sample里的 aggregation_svc
 		if err := fasthttp.Do(request, &ctx.Response); err != nil {
 			log.Error(err)
 		}
+		//调用 HttpDistributedTransaction 的 PostHandle 方法，也就是调用完被代理的http服务后，要做的一些事情
 		if err := l.doPostFilter(ctx); err != nil {
 			log.Error(err)
 		}

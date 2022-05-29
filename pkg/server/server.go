@@ -38,7 +38,7 @@ func (srv *Server) AddListener(listener proto.Listener) {
 }
 
 func (srv *Server) Start(ctx context.Context) {
-	go func() {
+	go func() {	//如果ctx被cancel掉，就调用srv.close，关闭所有listener
 		<-ctx.Done()
 		srv.close()
 	}()
@@ -48,10 +48,10 @@ func (srv *Server) Start(ctx context.Context) {
 		wg.Add(1)
 		go func(l proto.Listener) {
 			defer wg.Done()
-			l.Listen()
+			l.Listen()	//调用http或mysql的Listen具体实现，会卡在这里，直到被close
 		}(l)
 	}
-	wg.Wait()
+	wg.Wait()	//等待所有的listener返回，也就是被close
 }
 
 func (srv *Server) close() {

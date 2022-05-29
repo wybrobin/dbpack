@@ -253,7 +253,7 @@ func (c *Conn) ReadEphemeralPacket() ([]byte, error) {
 
 	r := c.getReader()
 
-	length, err := c.readHeaderFrom(r)
+	length, err := c.readHeaderFrom(r)	//从头部读取包体长度，避免粘包
 	if err != nil {
 		return nil, err
 	}
@@ -274,6 +274,7 @@ func (c *Conn) ReadEphemeralPacket() ([]byte, error) {
 		return *c.currentEphemeralBuffer, nil
 	}
 
+	//包体太大，就会进入这里
 	// Much slower path, revert to allocating everything from scratch.
 	// We're going to concatenate a lot of Content anyway, can't really
 	// optimize this code path easily.

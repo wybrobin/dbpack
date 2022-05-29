@@ -19,8 +19,8 @@ package filter
 import "github.com/cectc/dbpack/pkg/proto"
 
 var (
-	filterFactories = make(map[string]proto.FilterFactory)
-	filters         = make(map[string]proto.Filter)
+	filterFactories = make(map[string]proto.FilterFactory)	//存储了程序支持的FilterFactory，在init中以kind为key，调用RegistryFilterFactory注册进来
+	filters         = make(map[string]proto.Filter)	//存储了配置文件中所有filters，key是name
 )
 
 func RegistryFilterFactory(kind string, factory proto.FilterFactory) {

@@ -48,17 +48,19 @@ func InitDBManager(dataSources []*config.DataSource, factory func(dbName, dsn st
 			connectionPostFilters []proto.DBConnectionPostFilter
 		)
 		dataSource := dataSources[i]
-		resourcePool := initResourcePool(dataSource)
+		resourcePool := initResourcePool(dataSource)	//初始化了一个通过chan的生成的资源池，Put和Get对资源池进行操作
 		db := sql.NewDB(dataSource.Name, dataSource.PingInterval, dataSource.PingTimesForChangeStatus, resourcePool)
-		for j := 0; j < len(dataSource.Filters); j++ {
+		for j := 0; j < len(dataSource.Filters); j++ {//data_source_cluster.filters
 			filterName := dataSource.Filters[j]
-			f := filter.GetFilter(filterName)
+			f := filter.GetFilter(filterName)	//匹配 filters.name
 			if f != nil {
-				preFilter, ok := f.(proto.DBConnectionPreFilter)
+				preFilter, ok := f.(proto.DBConnectionPreFilter)	//就是实现了 PreHandle 接口的 Filter，mysql、connectionMetric 都实现了，
+																	// http实现的参数不同，属于 HttpPreFilter，可以在pkg/proto/interface.go通过跳转查看
 				if ok {
 					connectionPreFilters = append(connectionPreFilters, preFilter)
 				}
-				postFilter, ok := f.(proto.DBConnectionPostFilter)
+				postFilter, ok := f.(proto.DBConnectionPostFilter)	//就是实现了 PostHandle 接口的 Filter，mysql、connectionMetric 都实现了，
+																	// http实现的参数不同，属于 HttpPostFilter，可以在pkg/proto/interface.go通过跳转查看
 				if ok {
 					connectionPostFilters = append(connectionPostFilters, postFilter)
 				}
@@ -87,6 +89,7 @@ func (manager *DBManager) GetDB(name string) proto.DB {
 	return manager.resourcePools[name]
 }
 
+// GetResourcePoolStatus 拼写错误？？？
 func (manager *DBManager) GetResoucePoolStatus() error {
 	for _, dataSource := range manager.resourcePools {
 		db := dataSource.(*sql.DB)

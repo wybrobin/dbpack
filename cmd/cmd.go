@@ -74,6 +74,7 @@ var (
 			//h.Start()
 			conf := config.Load(configPath)
 
+			//将配置文件里的filters下的列表里的配置，根据kind拿到不通的FilterFactory，再由FilterFactory构建出不同的Filter，以name为key注册map到pkg/filter/filters变量里
 			for _, filterConf := range conf.Filters {
 				factory := filter.GetFilterFactory(filterConf.Kind)
 				if factory == nil {
@@ -86,6 +87,7 @@ var (
 				filter.RegisterFilter(filterConf.Name, f)
 			}
 
+			//根据data_source_cluster配置，对应filters配置，初始化资源池，构建 pkg/resource/data_source.go 里的 dbManager
 			resource.InitDBManager(conf.DataSources, func(dbName, dsn string) pools.Factory {
 				collector, err := driver.NewConnector(dbName, dsn)
 				if err != nil {
@@ -96,21 +98,21 @@ var (
 
 			executors := make(map[string]proto.Executor)
 			for _, executorConf := range conf.Executors {
-				if executorConf.Mode == config.SDB {
+				if executorConf.Mode == config.SDB {	//只连接一个数据库
 					executor, err := executor.NewSingleDBExecutor(executorConf)
 					if err != nil {
 						log.Fatal(err)
 					}
 					executors[executorConf.Name] = executor
 				}
-				if executorConf.Mode == config.RWS {
+				if executorConf.Mode == config.RWS {	//读写分离的数据库
 					executor, err := executor.NewReadWriteSplittingExecutor(executorConf)
 					if err != nil {
 						log.Fatal(err)
 					}
 					executors[executorConf.Name] = executor
 				}
-				if executorConf.Mode == config.SHD {
+				if executorConf.Mode == config.SHD {	//hash分片的数据库
 					executor, err := executor.NewShardingExecutor(executorConf)
 					if err != nil {
 						log.Fatal(err)
@@ -119,6 +121,7 @@ var (
 				}
 			}
 
+			//初始化分布式事务，主要是连接etcd。当多进程的时候，在共用一个appid的进程中，使用etcd选取出一个主进程，运行一些全局任务
 			if conf.DistributedTransaction != nil {
 				driver := etcd.NewEtcdStore(conf.DistributedTransaction.EtcdConfig)
 				dt.InitDistributedTransactionManager(conf.DistributedTransaction, driver)
@@ -126,9 +129,10 @@ var (
 
 			dbpack := server.NewServer()
 
+			//都是使用net.Listen监听，mysql的listener多个executor，因为mysql要透传到数据库，http的listener多个filters，因为http只让合法的路径通过
 			for _, listenerConf := range conf.Listeners {
 				switch listenerConf.ProtocolType {
-				case config.Mysql:
+				case config.Mysql:	//如果是mysql的listener，则根据executor匹配executors里面的name
 					listener, err := listener.NewMysqlListener(listenerConf)
 					if err != nil {
 						log.Fatalf("create mysql listener failed %v", err)
@@ -151,6 +155,7 @@ var (
 				}
 			}
 
+			//当进程收到 SIGINT 或 SIGTERM 信号时，根据 termination_drain_duration 配置（sample里没有），晚一点退出。如果连续2次收到，就直接退出
 			ctx, cancel := context.WithCancel(context.Background())
 			c := make(chan os.Signal, 2)
 			signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -168,6 +173,7 @@ var (
 
 			// init metrics for prometheus server scrape.
 			// default listen at 18888
+			//给 prometheus 用来监控的服务，实现/live、/ready和/metrics接口
 			var lis net.Listener
 			var lisErr error
 			if conf.HTTPListenPort != nil {
@@ -179,8 +185,10 @@ var (
 			if lisErr != nil {
 				log.Fatalf("unable init metrics server: %+v", lisErr)
 			}
+			//启动 prometheus 用来监控的http服务
 			go initServer(ctx, lis)
 
+			//启动listener
 			dbpack.Start(ctx)
 		},
 	}

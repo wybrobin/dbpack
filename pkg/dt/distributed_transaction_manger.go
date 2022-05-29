@@ -67,7 +67,8 @@ func InitDistributedTransactionManager(conf *config.DistributedTransaction, stor
 		branchSessionQueue: workqueue.New(),
 	}
 	go func() {
-		if storageDriver.LeaderElection(manager.applicationID) {
+		if storageDriver.LeaderElection(manager.applicationID) {	//这个是当多个dbpack启动的时候，选举出一个进程来实现全局管理
+																	//选举出来的leader会返回true，其他的则卡在这里，要等
 			if err := manager.processGlobalSessions(); err != nil {
 				log.Fatal(err)
 			}
@@ -98,7 +99,7 @@ type DistributedTransactionManager struct {
 func (manager *DistributedTransactionManager) Begin(ctx context.Context, transactionName string, timeout int32) (string, error) {
 	transactionID := uuid.NextID()
 	xid := fmt.Sprintf("gs/%s/%d", manager.applicationID, transactionID)
-	gt := &api.GlobalSession{
+	gt := &api.GlobalSession{	//pb结构
 		XID:             xid,
 		ApplicationID:   manager.applicationID,
 		TransactionID:   transactionID,
@@ -107,10 +108,10 @@ func (manager *DistributedTransactionManager) Begin(ctx context.Context, transac
 		BeginTime:       int64(misc.CurrentTimeMillis()),
 		Status:          api.Begin,
 	}
-	if err := manager.storageDriver.AddGlobalSession(ctx, gt); err != nil {
+	if err := manager.storageDriver.AddGlobalSession(ctx, gt); err != nil {	//将pb结构序列化后存到etcd里，key是XID，也就是gs/{applicationID}/{transactionID}
 		return "", err
 	}
-	manager.globalSessionQueue.AddAfter(gt, time.Duration(timeout)*time.Millisecond)
+	manager.globalSessionQueue.AddAfter(gt, time.Duration(timeout)*time.Millisecond)	//这个不知道是做什么的？？？
 	log.Infof("successfully begin global transaction xid = {%s}", gt.XID)
 	return xid, nil
 }
@@ -334,6 +335,7 @@ func (manager *DistributedTransactionManager) processBranchSessionQueue() {
 	}
 }
 
+//不停地从 branchSessionQueue 里取数据，然后判断状态，然后根据状态执行branch的commit或rollback，但是为什么又Add回去，然后又defer Done呢？？？
 func (manager *DistributedTransactionManager) processNextBranchSession(ctx context.Context) bool {
 	obj, shutdown := manager.branchSessionQueue.Get()
 	if shutdown {

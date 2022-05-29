@@ -22,6 +22,7 @@ import (
 	"github.com/cectc/dbpack/pkg/dt/api"
 )
 
+//抽象的实现分布式事务的存储接口，只要实现接口，可以替换etcd
 type Driver interface {
 	LeaderElection(applicationID string) bool
 	AddGlobalSession(ctx context.Context, globalSession *api.GlobalSession) error

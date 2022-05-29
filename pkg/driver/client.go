@@ -898,12 +898,13 @@ func (conn *BackendConnection) PrepareExecuteArgs(query string, args []interface
 	return stmt.execArgs(args)
 }
 
+//执行具有绑定参数的查询，也就是select ... where ...=?, ...=? 这种
 func (conn *BackendConnection) PrepareQueryArgs(query string, data []interface{}) (Result *mysql.Result, warnings uint16, err error) {
-	stmt, err := conn.prepare(query)
+	stmt, err := conn.prepare(query)	//先把带有?的select语句执行
 	if err != nil {
 		return nil, 0, err
 	}
-	return stmt.queryArgs(data)
+	return stmt.queryArgs(data)	//再把绑定的参数传进去
 }
 
 func (conn *BackendConnection) PrepareExecute(query string, data []byte) (result *mysql.Result, warnings uint16, err error) {

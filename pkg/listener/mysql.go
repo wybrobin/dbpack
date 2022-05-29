@@ -149,6 +149,7 @@ func (l *MysqlListener) Close() {
 	}
 }
 
+//处理mysql客户端连接进来的请求
 func (l *MysqlListener) handle(conn net.Conn, connectionID uint32) {
 	c := mysql.NewConn(conn)
 	c.ConnectionID = connectionID
@@ -163,6 +164,7 @@ func (l *MysqlListener) handle(conn net.Conn, connectionID uint32) {
 		l.executor.ConnectionClose(proto.WithConnectionID(context.Background(), l.connectionID))
 	}()
 
+	//处理一大堆和mysql客户端握手的来来回回的协议，有空看看
 	err := l.handshake(c)
 	if err != nil {
 		writeErr := c.WriteErrorPacketFromError(err)
@@ -180,6 +182,7 @@ func (l *MysqlListener) handle(conn net.Conn, connectionID uint32) {
 	}
 	log.Debugf("connection established, id: %d", connectionID)
 
+	//正式进入与mysql客户端的交互
 	for {
 		c.ResetSequence()
 		data, err := c.ReadEphemeralPacket()
@@ -191,9 +194,9 @@ func (l *MysqlListener) handle(conn net.Conn, connectionID uint32) {
 		content := make([]byte, len(data))
 		copy(content, data)
 		ctx := proto.WithVariableMap(context.Background())
-		ctx = proto.WithConnectionID(ctx, connectionID)
-		ctx = proto.WithSchema(ctx, l.schemaName)
-		err = l.ExecuteCommand(ctx, c, content)
+		ctx = proto.WithConnectionID(ctx, connectionID)	//context放入每来一个连接就自增的connectionID
+		ctx = proto.WithSchema(ctx, l.schemaName)	//context放入数据库名
+		err = l.ExecuteCommand(ctx, c, content)	//正式处理mysql的请求
 		if err != nil {
 			return
 		}
@@ -276,7 +279,7 @@ func (l *MysqlListener) writeHandshakeV10(c *mysql.Conn, enableTLS bool, salt []
 			13 + // auth-plugin-Content
 			misc.LenNullString(constant.MysqlNativePassword) // auth-plugin-name
 
-	data := c.StartEphemeralPacket(length)
+	data := c.StartEphemeralPacket(length)	//从内存池里拿出一段长度为length的空间
 	pos := 0
 
 	// Protocol version.
@@ -510,14 +513,14 @@ func scramblePassword(scramble []byte, password string) []byte {
 func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data []byte) error {
 	commandType := data[0]
 	switch commandType {
-	case constant.ComQuit:
+	case constant.ComQuit:	//quit命令
 		// https://dev.constant.Com/doc/internals/en/com-quit.html
 		c.RecycleReadPacket()
 		connectionID := proto.ConnectionID(ctx)
 		l.executor.ConnectionClose(proto.WithConnectionID(context.Background(), connectionID))
 		log.Debugf("connection closed, id: %d", connectionID)
 		return errors.New("ComQuit")
-	case constant.ComInitDB:
+	case constant.ComInitDB:	//use db_name 命令
 		db := string(data[1:])
 		c.RecycleReadPacket()
 		l.schemaName = db
@@ -529,7 +532,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 			log.Errorf("Error writing ComInitDB result to %s: %v", c, err)
 			return err
 		}
-	case constant.ComQuery:
+	case constant.ComQuery:	//查询请求，应该是select语句
 		err := func() error {
 			c.StartWriterBuffering()
 			defer func() {
@@ -539,7 +542,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 			}()
 
 			query := string(data[1:])
-			c.RecycleReadPacket()
+			c.RecycleReadPacket()	//应该是清空读缓冲区
 
 			p := parser.New()
 			stmt, err := p.ParseOneStmt(query, "", "")
@@ -617,7 +620,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 			log.Errorf("Error writing ComPing result to %s: %v", c, err)
 			return err
 		}
-	case constant.ComFieldList:
+	case constant.ComFieldList:	// 获取数据表字段信息 show column？
 		index := bytes.IndexByte(data, 0x00)
 		table := string(data[0:index])
 		wildcard := string(data[index+1:])
@@ -641,7 +644,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 		if err != nil {
 			return err
 		}
-	case constant.ComPrepare:
+	case constant.ComPrepare:	//预处理SQL
 		query := string(data[1:])
 		c.RecycleReadPacket()
 
@@ -678,7 +681,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 		if err := c.WritePrepare(l.capabilities, stmt); err != nil {
 			return err
 		}
-	case constant.ComStmtExecute:
+	case constant.ComStmtExecute:	//执行预处理
 		err := func() error {
 			c.StartWriterBuffering()
 			defer func() {
@@ -769,16 +772,16 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 		if err != nil {
 			return err
 		}
-	case constant.ComStmtClose: // no response
+	case constant.ComStmtClose: // no response	销毁预处理语句
 		stmtID, _, ok := misc.ReadUint32(data, 1)
 		c.RecycleReadPacket()
 		if ok {
 			l.stmts.Delete(stmtID)
 		}
-	case constant.ComStmtSendLongData: // no response
+	case constant.ComStmtSendLongData: // no response	发送BLOB类型数据
 		values := make([]byte, len(data))
 		copy(values, data)
-	case constant.ComStmtReset:
+	case constant.ComStmtReset:	//清除预处理语句参数缓存
 		stmtID, _, ok := misc.ReadUint32(data, 1)
 		c.RecycleReadPacket()
 		if ok {
@@ -787,7 +790,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 			stmt.BindVars = make(map[string]interface{}, 0)
 		}
 		return c.WriteOKPacket(0, 0, c.StatusFlags, 0)
-	case constant.ComSetOption:
+	case constant.ComSetOption:	//设置语句选项
 		operation, _, ok := misc.ReadUint16(data, 1)
 		c.RecycleReadPacket()
 		if ok {

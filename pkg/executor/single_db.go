@@ -66,6 +66,7 @@ func NewSingleDBExecutor(conf *config.Executor) (proto.Executor, error) {
 		localTransactionMap: &sync.Map{},
 	}
 
+	//这个sample里暂时没用上，看起来跟 data_source_cluster 比较相似，也是分 Pre 和 Post
 	for i := 0; i < len(conf.Filters); i++ {
 		filterName := conf.Filters[i]
 		f := filter.GetFilter(filterName)

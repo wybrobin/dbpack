@@ -112,8 +112,8 @@ func (f _httpFilter) PreHandle(ctx *fasthttp.RequestCtx) error {
 
 	transactionInfo, found := f.transactionInfos[strings.ToLower(string(path))]
 	if found {
-		result, err := f.handleHttp1GlobalBegin(ctx, transactionInfo)
-		if !result {
+		result, err := f.handleHttp1GlobalBegin(ctx, transactionInfo)	//开启全局事务xid，并把把xid写入etcd，同时写到ctx的head里
+		if !result {//出错就回滚
 			if err := f.handleHttp1GlobalEnd(ctx); err != nil {
 				log.Error(err)
 			}
@@ -121,6 +121,7 @@ func (f _httpFilter) PreHandle(ctx *fasthttp.RequestCtx) error {
 		return err
 	}
 
+	//这个sample里没用上，感觉是某个节点作为tcc模式的一个分支时，需要提前注册branch
 	tccResource, exists := f.tccResources[strings.ToLower(string(path))]
 	if exists {
 		result, err := f.handleHttp1BranchRegister(ctx, tccResource)
@@ -138,6 +139,7 @@ func (f _httpFilter) PostHandle(ctx *fasthttp.RequestCtx) error {
 	path := ctx.Request.RequestURI()
 	method := ctx.Method()
 
+	//为什么一定要POST呢？？？GET不行？
 	if !strings.EqualFold(string(method), fasthttp.MethodPost) {
 		return nil
 	}
@@ -149,6 +151,7 @@ func (f _httpFilter) PostHandle(ctx *fasthttp.RequestCtx) error {
 		}
 	}
 
+	//应该是用于TCC的，http作为中间的一个节点，branch结束
 	_, exists := f.tccResources[strings.ToLower(string(path))]
 	if exists {
 		if err := f.handleHttp1BranchEnd(ctx); err != nil {

@@ -240,6 +240,7 @@ func (executor *deleteExecutor) AfterImage(ctx context.Context) (*schema.TableRe
 	return nil, nil
 }
 
+//构造 select ... from ... where ... for update 语句
 func (executor *deleteExecutor) buildBeforeImageSql(tableMeta schema.TableMeta) string {
 	var b strings.Builder
 	fmt.Fprint(&b, "SELECT ")
