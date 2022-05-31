@@ -113,15 +113,16 @@ func (f *_mysqlFilter) processAfterPrepareDelete(ctx context.Context, conn *driv
 	return dt.GetUndoLogManager().InsertUndoLogWithNormal(conn, xid, branchID, undoLog)
 }
 
+//处理insert后置的事情
 func (f *_mysqlFilter) processAfterPrepareInsert(ctx context.Context, conn *driver.BackendConnection,
 	result proto.Result, stmt *proto.Stmt, insertStmt *ast.InsertStmt) error {
-	has, xid := hasXIDHint(insertStmt.TableHints)
+	has, xid := hasXIDHint(insertStmt.TableHints)	//已经在parse里解析好了的/*+ XID('gs/aggregationSvc/9169596969598582796') */这种格式，HintName是XID，HintData是gs/aggregationSvc/9169596969598582796
 	if !has {
 		return nil
 	}
 
-	executor := exec.NewPrepareInsertExecutor(conn, insertStmt, stmt.BindVars, result)
-	afterImage, err := executor.AfterImage(ctx)
+	executor := exec.NewPrepareInsertExecutor(conn, insertStmt, stmt.BindVars, result)	//从 prepare_insert.go 文件new出executor对象
+	afterImage, err := executor.AfterImage(ctx)	//拿insert后置的镜像
 	if err != nil {
 		return err
 	}
@@ -130,16 +131,17 @@ func (f *_mysqlFilter) processAfterPrepareInsert(ctx context.Context, conn *driv
 		return errors.New("schema name should not be nil")
 	}
 
+	//`order`.`so_master`:1237827526
 	lockKeys := schema.BuildLockKey(afterImage)
 	log.Debugf("insert, lockKey: %s", lockKeys)
-	undoLog := exec.BuildUndoItem(true, constant.SQLType_INSERT, schemaName, executor.GetTableName(), lockKeys, nil, afterImage)
+	undoLog := exec.BuildUndoItem(true, constant.SQLType_INSERT, schemaName, executor.GetTableName(), lockKeys, nil, afterImage)	//返回 SqlUndoLog 类型
 
-	branchID, err := f.registerBranchTransaction(ctx, xid, conn.DataSourceName(), lockKeys)
+	branchID, err := f.registerBranchTransaction(ctx, xid, conn.DataSourceName(), lockKeys)	//注册分支事务到etcd，并锁住主键，并关联全局事务
 	if err != nil {
 		return err
 	}
 	log.Debugf("insert, branch id: %d", branchID)
-	return dt.GetUndoLogManager().InsertUndoLogWithNormal(conn, xid, branchID, undoLog)
+	return dt.GetUndoLogManager().InsertUndoLogWithNormal(conn, xid, branchID, undoLog)	//将 undolog.SqlUndoLog 序列化后写入undo_log表
 }
 
 func (f *_mysqlFilter) processAfterPrepareUpdate(ctx context.Context, conn *driver.BackendConnection,

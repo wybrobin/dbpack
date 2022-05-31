@@ -94,6 +94,7 @@ func (f *_mysqlFilter) GetKind() string {
 	return mysqlFilter
 }
 
+//mysql filter 需要执行的前置的内容
 func (f *_mysqlFilter) PreHandle(ctx context.Context, conn proto.Connection) error {
 	var err error
 	bc := conn.(*driver.BackendConnection)
@@ -112,7 +113,7 @@ func (f *_mysqlFilter) PreHandle(ctx context.Context, conn proto.Connection) err
 		default:
 			return nil
 		}
-	case constant.ComStmtExecute:
+	case constant.ComStmtExecute:	//只有delete和update需要beforeImage，insert为nil
 		stmt := proto.PrepareStmt(ctx)
 		if stmt == nil {
 			return errors.New("prepare stmt should not be nil")
@@ -131,11 +132,12 @@ func (f *_mysqlFilter) PreHandle(ctx context.Context, conn proto.Connection) err
 	return err
 }
 
+//mysql filter 需要执行的后置的内容
 func (f *_mysqlFilter) PostHandle(ctx context.Context, result proto.Result, conn proto.Connection) error {
 	var err error
 	bc := conn.(*driver.BackendConnection)
 	commandType := proto.CommandType(ctx)
-	switch commandType {
+	switch commandType {	//后置内容的分类
 	case constant.ComQuery:
 		stmt := proto.QueryStmt(ctx)
 		if stmt == nil {
@@ -160,7 +162,7 @@ func (f *_mysqlFilter) PostHandle(ctx context.Context, result proto.Result, conn
 		if stmt == nil {
 			return errors.New("prepare stmt should not be nil")
 		}
-		switch stmtNode := stmt.StmtNode.(type) {
+		switch stmtNode := stmt.StmtNode.(type) {	//根据delete、insert、update、select区分
 		case *ast.DeleteStmt:
 			err = f.processAfterPrepareDelete(ctx, bc, stmt, stmtNode)
 		case *ast.InsertStmt:
@@ -193,7 +195,7 @@ func (f *_mysqlFilter) registerBranchTransaction(ctx context.Context, xid, resou
 		ApplicationData: nil,
 	}
 	for retryCount := 0; retryCount < f.lockRetryTimes; retryCount++ {
-		_, branchID, err = dt.GetDistributedTransactionManager().BranchRegister(context.Background(), br)
+		_, branchID, err = dt.GetDistributedTransactionManager().BranchRegister(context.Background(), br)	//注册分支事务到etcd，并锁住主键，并关联全局事务
 		if err == nil {
 			break
 		}

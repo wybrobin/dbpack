@@ -49,19 +49,20 @@ func (tx *Tx) Query(ctx context.Context, query string) (proto.Result, uint16, er
 	return result, warn, err
 }
 
+//！！！关键的函数，前后分离执行的分界点
 func (tx *Tx) ExecuteStmt(ctx context.Context, stmt *proto.Stmt) (proto.Result, uint16, error) {
 	tx.db.inflightRequests.Inc()
 	defer tx.db.inflightRequests.Dec()
 
 	query := stmt.StmtNode.Text()
-	if err := tx.db.doConnectionPreFilter(ctx, tx.conn); err != nil {
+	if err := tx.db.doConnectionPreFilter(ctx, tx.conn); err != nil {	//需要先执行的PreFilter的内容
 		return nil, 0, err
 	}
-	result, warn, err := tx.conn.PrepareQuery(query, stmt.ParamData)
+	result, warn, err := tx.conn.PrepareQuery(query, stmt.ParamData)	//正式执行mysql原语句
 	if err != nil {
 		return result, warn, err
 	}
-	if err := tx.db.doConnectionPostFilter(ctx, result, tx.conn); err != nil {
+	if err := tx.db.doConnectionPostFilter(ctx, result, tx.conn); err != nil {	//需要执行后的PostFilter的内容
 		return nil, 0, err
 	}
 	return result, warn, err

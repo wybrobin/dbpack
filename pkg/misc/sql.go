@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"strings"
 )
-
+//组成(?,?,?,...,?)
 func MysqlAppendInParam(size int) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "(")

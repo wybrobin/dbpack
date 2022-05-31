@@ -283,7 +283,7 @@ var MySQLKeyword = map[string]string{
 	"YEAR_MONTH":                    "YEAR_MONTH",
 	"ZEROFILL":                      "ZEROFILL",
 }
-
+//检查是不是mysql的关键词
 func Check(fieldOrTableName string) bool {
 	_, ok := MySQLKeyword[fieldOrTableName]
 	if ok {
@@ -299,7 +299,7 @@ func Check(fieldOrTableName string) bool {
 func CheckEscape(fieldOrTableName string) bool {
 	return Check(fieldOrTableName)
 }
-
+//检查是不是mysql的关键词，如果是的话，则加上``，否则直接返回
 func CheckAndReplace(fieldOrTableName string) string {
 	if Check(fieldOrTableName) {
 		return "`" + fieldOrTableName + "`"

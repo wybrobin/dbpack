@@ -923,6 +923,7 @@ func (conn *BackendConnection) PrepareQuery(query string, data []byte) (Result *
 	return stmt.query(data)
 }
 
+//mysql prepare 真正执行的地方
 func (conn *BackendConnection) prepare(query string) (*BackendStatement, error) {
 	// This is a new command, need to reset the sequence.
 	conn.ResetSequence()

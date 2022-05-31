@@ -20,10 +20,10 @@ import (
 	"fmt"
 	"strings"
 )
-
+//将order^^^`order`.`so_master`^^^A,B 拆分成order^^^`order`.`so_master`^^^A和order^^^`order`.`so_master`^^^B
 func CollectRowKeys(lockKey, resourceID string) []string {
 	var locks = make([]string, 0)
-	tableGroupedLockKeys := strings.Split(lockKey, ";")
+	tableGroupedLockKeys := strings.Split(lockKey, ";")	//当锁多个值的时候，用;隔开，这里拆分成切片
 	for _, tableGroupedLockKey := range tableGroupedLockKeys {
 		if tableGroupedLockKey != "" {
 			idx := strings.Index(tableGroupedLockKey, ":")
@@ -31,8 +31,8 @@ func CollectRowKeys(lockKey, resourceID string) []string {
 				return nil
 			}
 
-			tableName := tableGroupedLockKey[0:idx]
-			mergedPKs := tableGroupedLockKey[idx+1:]
+			tableName := tableGroupedLockKey[0:idx]	//通过:拆分tablename，例如：`order`.`so_master`
+			mergedPKs := tableGroupedLockKey[idx+1:]	//通过:拆分出主键值，例如：3742195289
 
 			if mergedPKs == "" {
 				return nil
@@ -45,7 +45,7 @@ func CollectRowKeys(lockKey, resourceID string) []string {
 
 			for _, pk := range pks {
 				if pk != "" {
-					locks = append(locks, GetRowKey(resourceID, tableName, pk))
+					locks = append(locks, GetRowKey(resourceID, tableName, pk))	//拼接字符串，例如：order^^^`order`.`so_master`^^^3742195289
 				}
 			}
 		}

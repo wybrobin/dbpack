@@ -532,7 +532,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 			log.Errorf("Error writing ComInitDB result to %s: %v", c, err)
 			return err
 		}
-	case constant.ComQuery:	//查询请求，应该是select语句
+	case constant.ComQuery:	//字符串替换拼接请求，不含?的，//START TRANSACTION、COMMIT
 		err := func() error {
 			c.StartWriterBuffering()
 			defer func() {
@@ -557,7 +557,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 
 			ctx := proto.WithCommandType(ctx, commandType)
 			ctx = proto.WithQueryStmt(ctx, stmt)
-			result, warn, err := l.executor.ExecutorComQuery(ctx, query)
+			result, warn, err := l.executor.ExecutorComQuery(ctx, query)	//分为SDB、RWS、SHD三种模式
 			if err != nil {
 				if writeErr := c.WriteErrorPacketFromError(err); writeErr != nil {
 					log.Error("Error writing query error to client %v: %v", l.connectionID, writeErr)
@@ -644,7 +644,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 		if err != nil {
 			return err
 		}
-	case constant.ComPrepare:	//预处理SQL
+	case constant.ComPrepare:	//22 预处理SQL，把StatementID对应的stmt暂存起来给23传参时再取出
 		query := string(data[1:])
 		c.RecycleReadPacket()
 
@@ -676,12 +676,12 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 			stmt.BindVars = make(map[string]interface{}, paramsCount)
 		}
 
-		l.stmts.Store(stmt.StatementID, stmt)
+		l.stmts.Store(stmt.StatementID, stmt)	//把StatementID对应的stmt暂存起来
 
 		if err := c.WritePrepare(l.capabilities, stmt); err != nil {
 			return err
 		}
-	case constant.ComStmtExecute:	//执行预处理
+	case constant.ComStmtExecute:	//23 执行预处理，update、insert都走这里，这里应该是传参数了
 		err := func() error {
 			c.StartWriterBuffering()
 			defer func() {
@@ -712,11 +712,11 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 
 			si, _ := l.stmts.Load(stmtID)
 			stmt := si.(*proto.Stmt)
-			stmt.ParamData = data
+			stmt.ParamData = data	//将绑定的参数值放到stmt的ParamData里
 
 			ctx := proto.WithCommandType(ctx, commandType)
 			ctx = proto.WithPrepareStmt(ctx, stmt)
-			result, warn, err := l.executor.ExecutorComStmtExecute(ctx, stmt)
+			result, warn, err := l.executor.ExecutorComStmtExecute(ctx, stmt)	//正式开始执行
 			if err != nil {
 				if writeErr := c.WriteErrorPacketFromError(err); writeErr != nil {
 					log.Error("Error writing query error to client %v: %v", l.connectionID, writeErr)

@@ -121,6 +121,7 @@ func (executor *SingleDBExecutor) ExecuteFieldList(ctx context.Context, table, w
 	return db.ExecuteFieldList(ctx, table, wildcard)
 }
 
+//START TRANSACTION、COMMIT
 func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql string) (proto.Result, uint16, error) {
 	var (
 		db     proto.DB
@@ -192,11 +193,12 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 	}
 }
 
+//insert, update
 func (executor *SingleDBExecutor) ExecutorComStmtExecute(ctx context.Context, stmt *proto.Stmt) (proto.Result, uint16, error) {
 	connectionID := proto.ConnectionID(ctx)
 	log.Debugf("connectionID: %d, prepare: %s", connectionID, stmt.PrepareStmt)
-	txi, ok := executor.localTransactionMap.Load(connectionID)
-	if ok {
+	txi, ok := executor.localTransactionMap.Load(connectionID)	//查看当前连接是否在事务里
+	if ok {//如果在事务里，则以事务的方式执行操作
 		tx := txi.(proto.Tx)
 		return tx.ExecuteStmt(ctx, stmt)
 	}

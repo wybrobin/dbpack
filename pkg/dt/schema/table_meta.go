@@ -27,7 +27,7 @@ type TableMeta struct {
 	AllColumns map[string]ColumnMeta
 	AllIndexes map[string]IndexMeta
 }
-
+//返回map<主键列名, ColumnMeta信息>
 func (meta TableMeta) GetPrimaryKeyMap() map[string]ColumnMeta {
 	pk := make(map[string]ColumnMeta)
 	for _, index := range meta.AllIndexes {
@@ -37,7 +37,7 @@ func (meta TableMeta) GetPrimaryKeyMap() map[string]ColumnMeta {
 			}
 		}
 	}
-	if len(pk) > 1 {
+	if len(pk) > 1 {	//联合主键不支持？？？
 		log.Panicf("%s contains multi PK, but current not support.", meta.TableName)
 	}
 	if len(pk) < 1 {
@@ -45,16 +45,16 @@ func (meta TableMeta) GetPrimaryKeyMap() map[string]ColumnMeta {
 	}
 	return pk
 }
-
+//只返回主键名字列表
 func (meta TableMeta) GetPrimaryKeyOnlyName() []string {
 	list := make([]string, 0)
-	pk := meta.GetPrimaryKeyMap()
+	pk := meta.GetPrimaryKeyMap()	//返回map<主键列名, ColumnMeta信息>
 	for key := range pk {
 		list = append(list, key)
 	}
 	return list
 }
-
+//拿主键列名
 func (meta TableMeta) GetPKName() string {
 	return meta.GetPrimaryKeyOnlyName()[0]
 }

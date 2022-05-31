@@ -185,7 +185,7 @@ func (manager MysqlUndoLogManager) DeleteUndoLogByLogCreated(db proto.DB, logCre
 
 func (manager MysqlUndoLogManager) InsertUndoLogWithNormal(conn proto.Connection, xid string, branchID int64, undoLog *undolog.SqlUndoLog) error {
 	parser := undolog.GetUndoLogParser()
-	undoLogContent := parser.EncodeSqlUndoLog(undoLog)
+	undoLogContent := parser.EncodeSqlUndoLog(undoLog)	//编码undolog结构为二进制
 	return manager.insertUndoLog(conn, xid, branchID, buildContext(parser.GetName()), undoLogContent, Normal)
 }
 
@@ -194,11 +194,11 @@ func (manager MysqlUndoLogManager) InsertUndoLogWithGlobalFinished(conn proto.Co
 	undoLogContent := parser.EncodeSqlUndoLog(undoLog)
 	return manager.insertUndoLog(conn, xid, branchID, buildContext(parser.GetName()), undoLogContent, GlobalFinished)
 }
-
+//插入undolog
 func (manager MysqlUndoLogManager) insertUndoLog(conn proto.Connection, xid string, branchID int64, rollbackCtx string,
 	undoLogContent []byte, state State) error {
 	bc := conn.(*driver.BackendConnection)
-	args := []interface{}{xid, branchID, rollbackCtx, undoLogContent, state}
+	args := []interface{}{xid, branchID, rollbackCtx, undoLogContent, state}	//rollbackCtx 为 serializer=protobuf
 	_, _, err := bc.PrepareExecuteArgs(InsertUndoLogSql, args)
 	return err
 }

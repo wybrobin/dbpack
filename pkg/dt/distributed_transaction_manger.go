@@ -126,8 +126,8 @@ func (manager *DistributedTransactionManager) Rollback(ctx context.Context, xid 
 
 func (manager *DistributedTransactionManager) BranchRegister(ctx context.Context, in *api.BranchRegisterRequest) (string, int64, error) {
 	branchSessionID := uuid.NextID()
-	branchID := fmt.Sprintf("bs/%s/%d", manager.applicationID, branchSessionID)
-	transactionID := misc.GetTransactionID(in.XID)
+	branchID := fmt.Sprintf("bs/%s/%d", manager.applicationID, branchSessionID)	//bs/orderSvc/9169597338326306817
+	transactionID := misc.GetTransactionID(in.XID)	//将 gs/aggregationSvc/9169597303674880004 提取出 9169597303674880004
 	bs := &api.BranchSession{
 		BranchID:        branchID,
 		ApplicationID:   manager.applicationID,
@@ -142,7 +142,7 @@ func (manager *DistributedTransactionManager) BranchRegister(ctx context.Context
 		BeginTime:       int64(misc.CurrentTimeMillis()),
 	}
 
-	if err := manager.storageDriver.AddBranchSession(ctx, bs); err != nil {
+	if err := manager.storageDriver.AddBranchSession(ctx, bs); err != nil {	//注册分支事务到etcd，并锁住主键，并关联全局事务
 		return "", 0, err
 	}
 	return branchID, branchSessionID, nil

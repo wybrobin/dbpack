@@ -63,44 +63,44 @@ func BuildLockKey(lockKeyRecords *TableRecords) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(lockKeyRecords.TableName)
+	sb.WriteString(lockKeyRecords.TableName)	//表名
 	sb.WriteByte(':')
-	fields := lockKeyRecords.PKFields()
+	fields := lockKeyRecords.PKFields()	//主键列表
 	length := len(fields)
 	for i, field := range fields {
-		sb.WriteString(fmt.Sprintf("%s", field.Value))
+		sb.WriteString(fmt.Sprintf("%v", field.Value))	//主键值
 		if i < length-1 {
-			sb.WriteByte(',')
+			sb.WriteByte(',')	//多主键用,分隔
 		}
 	}
 	return sb.String()
 }
-
+//根据查询结果，解码成 TableRecords 的结构，里面会有多行列名、列值和是否是主键
 func BuildBinaryRecords(meta TableMeta, result *mysql.Result) *TableRecords {
-	records := NewTableRecords(meta)
-	rs := make([]*Row, 0)
+	records := NewTableRecords(meta)	//创建一个TableRecords对象
+	rs := make([]*Row, 0)	//记录多行数据
 
 	for {
-		row, err := result.Rows.Next()
+		row, err := result.Rows.Next()	//拿一行
 		if err != nil {
 			break
 		}
 
 		binaryRow := mysql.BinaryRow{Row: row}
-		values, err := binaryRow.Decode()
+		values, err := binaryRow.Decode()	//解码，将一行拆成多列
 		if err != nil {
 			break
 		}
 		fields := make([]*Field, 0, len(result.Fields))
 		for i, col := range result.Fields {
 			field := &Field{
-				Name: col.FiledName(),
+				Name: col.FiledName(),	//列名
 				Type: meta.AllColumns[col.FiledName()].DataType,
 			}
-			if values[i] != nil {
+			if values[i] != nil {	//值不是null，就赋值
 				field.Value = values[i].Val
 			}
-			if strings.EqualFold(col.FiledName(), meta.GetPKName()) {
+			if strings.EqualFold(col.FiledName(), meta.GetPKName()) {	//如果是主键，则keyType赋值为主键
 				field.KeyType = PrimaryKey
 			}
 			fields = append(fields, field)

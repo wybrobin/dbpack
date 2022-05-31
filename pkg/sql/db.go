@@ -210,6 +210,7 @@ func (db *DB) SetConnectionPostFilters(filters []proto.DBConnectionPostFilter) {
 	db.connectionPostFilters = filters
 }
 
+//执行所有前置的内容
 func (db *DB) doConnectionPreFilter(ctx context.Context, conn proto.Connection) error {
 	for i := 0; i < len(db.connectionPreFilters); i++ {
 		f := db.connectionPreFilters[i]
@@ -221,6 +222,7 @@ func (db *DB) doConnectionPreFilter(ctx context.Context, conn proto.Connection) 
 	return nil
 }
 
+//执行所有后置的内容
 func (db *DB) doConnectionPostFilter(ctx context.Context, result proto.Result, conn proto.Connection) error {
 	for i := 0; i < len(db.connectionPostFilters); i++ {
 		f := db.connectionPostFilters[i]

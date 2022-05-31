@@ -97,6 +97,7 @@ var (
 				return collector.NewBackendConnection
 			})
 
+			//executors分为SDB、RWS、SHD三种模式，设置一个name，然后让listeners根据name去绑定
 			executors := make(map[string]proto.Executor)
 			for _, executorConf := range conf.Executors {
 				if executorConf.Mode == config.SDB {	//只连接一个数据库

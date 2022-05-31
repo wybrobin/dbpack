@@ -46,7 +46,7 @@ func GetTableMetaCache() *MysqlTableMetaCache {
 type MysqlTableMetaCache struct {
 	tableMetaCache *cache.Cache
 }
-
+//从读表INFORMATION_SCHEMA库拿表的列信息和索引信息
 func (cache *MysqlTableMetaCache) GetTableMeta(ctx context.Context, db proto.DB, tableName string) (schema.TableMeta, error) {
 	schemaName := proto.Schema(ctx)
 	if schemaName == "" {
@@ -55,17 +55,17 @@ func (cache *MysqlTableMetaCache) GetTableMeta(ctx context.Context, db proto.DB,
 	if tableName == "" {
 		return schema.TableMeta{}, errors.New("TableMeta cannot be fetched without tableName")
 	}
-	cacheKey := cache.GetCacheKey(schemaName, tableName)
-	tMeta, found := cache.tableMetaCache.Get(cacheKey)
+	cacheKey := cache.GetCacheKey(schemaName, tableName)	//order.so_master
+	tMeta, found := cache.tableMetaCache.Get(cacheKey)	//从程序缓存里拿 order.so_master 的值tMeta
 	if found {
 		meta := tMeta.(schema.TableMeta)
 		return meta, nil
 	} else {
-		meta, err := cache.FetchSchema(ctx, db, tableName)
+		meta, err := cache.FetchSchema(ctx, db, tableName)	//读表INFORMATION_SCHEMA.COLUMNS和INFORMATION_SCHEMA.STATISTICS获取列信息和索引信息
 		if err != nil {
 			return schema.TableMeta{}, errors.WithStack(err)
 		}
-		cache.tableMetaCache.Set(cacheKey, meta, ExpireTime)
+		cache.tableMetaCache.Set(cacheKey, meta, ExpireTime)//写回缓存里
 		return meta, nil
 	}
 }
@@ -88,7 +88,7 @@ func (cache *MysqlTableMetaCache) Refresh(db proto.DB) error {
 	}
 	return nil
 }
-
+//把 `order`.`so_master` 变成 order.so_master，再用.前后拆开，又组成order.so_master返回
 func (cache *MysqlTableMetaCache) GetCacheKey(dbName, tableName string) string {
 	var defaultTableName string
 	tableNameWithCatalog := strings.Split(strings.ReplaceAll(tableName, "`", ""), ".")
@@ -99,7 +99,7 @@ func (cache *MysqlTableMetaCache) GetCacheKey(dbName, tableName string) string {
 	}
 	return fmt.Sprintf("%s.%s", dbName, defaultTableName)
 }
-
+//读表INFORMATION_SCHEMA.COLUMNS和INFORMATION_SCHEMA.STATISTICS获取列信息和索引信息
 func (cache *MysqlTableMetaCache) FetchSchema(ctx context.Context, db proto.DB, tableName string) (schema.TableMeta, error) {
 	schemaName := proto.Schema(ctx)
 	tm := schema.TableMeta{
@@ -108,7 +108,7 @@ func (cache *MysqlTableMetaCache) FetchSchema(ctx context.Context, db proto.DB, 
 		AllColumns: make(map[string]schema.ColumnMeta),
 		AllIndexes: make(map[string]schema.IndexMeta),
 	}
-	columnMetas, err := GetColumns(ctx, db, tableName)
+	columnMetas, err := GetColumns(ctx, db, tableName)	//从 INFORMATION_SCHEMA.COLUMNS 表里查询表所有列的meta数据
 	if err != nil {
 		return schema.TableMeta{}, errors.Wrapf(err, "Could not found any columns in the table: %s", tableName)
 	}
@@ -118,13 +118,13 @@ func (cache *MysqlTableMetaCache) FetchSchema(ctx context.Context, db proto.DB, 
 		columns = append(columns, column.ColumnName)
 	}
 	tm.Columns = columns
-	indexes, err := GetIndexes(ctx, db, tableName)
+	indexes, err := GetIndexes(ctx, db, tableName)	//从表INFORMATION_SCHEMA.STATISTICS查询某个tableName表的所有索引
 	if err != nil {
 		return schema.TableMeta{}, errors.Wrapf(err, "Could not found any index in the table: %s", tableName)
 	}
 	for _, index := range indexes {
-		col := tm.AllColumns[index.ColumnName]
-		idx, ok := tm.AllIndexes[index.IndexName]
+		col := tm.AllColumns[index.ColumnName]	//拿到索引的列信息
+		idx, ok := tm.AllIndexes[index.IndexName]	//写回返回值tm的AllIndexes里，增加
 		if ok {
 			idx.Values = append(idx.Values, col)
 		} else {
@@ -132,13 +132,13 @@ func (cache *MysqlTableMetaCache) FetchSchema(ctx context.Context, db proto.DB, 
 			tm.AllIndexes[index.IndexName] = index
 		}
 	}
-	if len(tm.AllIndexes) == 0 {
+	if len(tm.AllIndexes) == 0 {	//没有索引就要返回错误？？？
 		return schema.TableMeta{}, errors.Errorf("Could not found any index in the table: %s", tableName)
 	}
 
 	return tm, nil
 }
-
+//从 INFORMATION_SCHEMA.COLUMNS 表里查询表的meta数据
 func GetColumns(ctx context.Context, db proto.DB, tableName string) ([]schema.ColumnMeta, error) {
 	var (
 		schemaName = proto.Schema(ctx)
@@ -230,7 +230,7 @@ func GetColumns(ctx context.Context, db proto.DB, tableName string) ([]schema.Co
 
 	return result, nil
 }
-
+//从表INFORMATION_SCHEMA.STATISTICS查询某个tableName表的所有索引
 func GetIndexes(ctx context.Context, db proto.DB, tableName string) ([]schema.IndexMeta, error) {
 	var (
 		schemaName = proto.Schema(ctx)

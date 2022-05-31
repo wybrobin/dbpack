@@ -99,23 +99,23 @@ func (s *store) AddGlobalSession(ctx context.Context, globalSession *api.GlobalS
 	_, err = s.client.Put(ctx, globalSession.XID, string(data))
 	return err
 }
-
+//注册分支事务到etcd，并锁住主键，并关联全局事务
 func (s *store) AddBranchSession(ctx context.Context, branchSession *api.BranchSession) error {
 	if branchSession.Type == api.AT && branchSession.LockKey != "" {
 		rowKeys := misc.CollectRowKeys(branchSession.LockKey, branchSession.ResourceID)
 
-		txn := s.client.Txn(ctx)
+		txn := s.client.Txn(ctx)	//生成一个txn指针对象
 		var cmpSlice []clientv3.Cmp
 		for _, rowKey := range rowKeys {
-			cmpSlice = append(cmpSlice, notFound(rowKey))
+			cmpSlice = append(cmpSlice, notFound(rowKey))	//这段没看懂？？？感觉是etcd的事务
 		}
-		txn = txn.If(cmpSlice...)
+		txn = txn.If(cmpSlice...)	//不懂？？？
 
 		var ops []clientv3.Op
 		for _, rowKey := range rowKeys {
-			lockKey := fmt.Sprintf("lk/%s/%s", branchSession.XID, rowKey)
+			lockKey := fmt.Sprintf("lk/%s/%s", branchSession.XID, rowKey)	//lk/gs/aggregationSvc/9169597303674880004/order^^^`order`.`so_master`^^^3742195289
 			ops = append(ops, clientv3.OpPut(lockKey, rowKey))
-			ops = append(ops, clientv3.OpPut(rowKey, lockKey))
+			ops = append(ops, clientv3.OpPut(rowKey, lockKey))	////感觉是在事务里锁住了一行
 		}
 		txn.Then(ops...)
 
@@ -132,14 +132,14 @@ func (s *store) AddBranchSession(ctx context.Context, branchSession *api.BranchS
 	if err != nil {
 		return err
 	}
-	_, err = s.client.Put(ctx, branchSession.BranchID, string(data))
+	_, err = s.client.Put(ctx, branchSession.BranchID, string(data))	//BranchID 例如：bs/orderSvc/9169597338326306817
 	if err != nil {
 		return err
 	}
 
 	// 全局事务关联的事务分支
-	globalBranchKey := fmt.Sprintf("bs/%s/%d", branchSession.XID, branchSession.BranchSessionID)
-	_, err = s.client.Put(ctx, globalBranchKey, branchSession.BranchID)
+	globalBranchKey := fmt.Sprintf("bs/%s/%d", branchSession.XID, branchSession.BranchSessionID)	//bs/gs/aggregationSvc/9169597303674880004/9169597338326306817
+	_, err = s.client.Put(ctx, globalBranchKey, branchSession.BranchID)	//可以根据 --prefix bs/gs/aggregationSvc/9169597303674880004 查到分支 9169597338326306817
 	return err
 }
 

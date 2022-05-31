@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"strings"
 )
-
+//将 gs/aggregationSvc/9169597303674880004 提取出 9169597303674880004
 func GetTransactionID(xid string) int64 {
 	if xid == "" {
 		return -1
