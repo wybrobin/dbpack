@@ -18,6 +18,7 @@ package exec
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/cectc/dbpack/pkg/driver"
@@ -52,7 +53,11 @@ func (executor *queryInsertExecutor) BeforeImage(ctx context.Context) (*schema.T
 }
 
 func (executor *queryInsertExecutor) AfterImage(ctx context.Context) (*schema.TableRecords, error) {
-	// todo
+	//var afterImage *schema.TableRecords
+
+	fmt.Println(executor.stmt.Lists)
+
+
 	return nil, nil
 }
 

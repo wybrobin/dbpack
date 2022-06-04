@@ -32,7 +32,7 @@ import (
 )
 
 func (f *_mysqlFilter) processBeforePrepareDelete(ctx context.Context, conn *driver.BackendConnection, stmt *proto.Stmt, deleteStmt *ast.DeleteStmt) error {
-	if hasGlobalLockHint(deleteStmt.TableHints) {
+	if hasGlobalLockHint(deleteStmt.TableHints) {	//带了/*+ GlobalLock() */的才会进去
 		executor := exec.NewPrepareGlobalLockExecutor(conn, false, deleteStmt, nil, stmt.BindVars)
 		result, err := executor.Executable(ctx, f.lockRetryInterval, f.lockRetryTimes)
 		if err != nil {
@@ -58,7 +58,7 @@ func (f *_mysqlFilter) processBeforePrepareDelete(ctx context.Context, conn *dri
 }
 
 func (f *_mysqlFilter) processBeforePrepareUpdate(ctx context.Context, conn *driver.BackendConnection, stmt *proto.Stmt, updateStmt *ast.UpdateStmt) error {
-	if hasGlobalLockHint(updateStmt.TableHints) {
+	if hasGlobalLockHint(updateStmt.TableHints) {//带了/*+ GlobalLock() */的才会进去
 		executor := exec.NewPrepareGlobalLockExecutor(conn, true, nil, updateStmt, stmt.BindVars)
 		result, err := executor.Executable(ctx, f.lockRetryInterval, f.lockRetryTimes)
 		if err != nil {

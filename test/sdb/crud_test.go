@@ -29,7 +29,7 @@ const (
 	driverName = "mysql"
 
 	// user:password@tcp(127.0.0.1:3306)/dbName?
-	dataSourceName = "dksl:123456@tcp(127.0.0.1:13306)/employees?timeout=10s&readTimeout=10s&writeTimeout=10s&parseTime=true&loc=Local&charset=utf8mb4,utf8"
+	dataSourceName = "dksl:123456@tcp(127.0.0.1:13308)/employees?timeout=10s&readTimeout=10s&writeTimeout=10s&parseTime=true&loc=Local&charset=utf8mb4,utf8"
 	insertEmployee = `INSERT INTO employees ( emp_no, birth_date, first_name, last_name, gender, hire_date ) VALUES (?, ?, ?, ?, ?, ?)`
 	selectEmployee = `SELECT emp_no, birth_date, first_name, last_name, gender, hire_date FROM employees WHERE emp_no = ?`
 	updateEmployee = `UPDATE employees set last_name = ? where emp_no = ?`

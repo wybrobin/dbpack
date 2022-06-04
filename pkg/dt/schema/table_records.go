@@ -68,7 +68,12 @@ func BuildLockKey(lockKeyRecords *TableRecords) string {
 	fields := lockKeyRecords.PKFields()	//主键列表
 	length := len(fields)
 	for i, field := range fields {
-		sb.WriteString(fmt.Sprintf("%v", field.Value))	//主键值
+		_, isByte := field.Value.([]byte)
+		if isByte {
+			sb.WriteString(fmt.Sprintf("%s", field.Value))
+		} else {
+			sb.WriteString(fmt.Sprintf("%v", field.Value))	//主键值
+		}
 		if i < length-1 {
 			sb.WriteByte(',')	//多主键用,分隔
 		}

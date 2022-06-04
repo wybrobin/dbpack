@@ -55,7 +55,7 @@ func NewPrepareGlobalLockExecutor(
 		args:       args,
 	}
 }
-
+//带了/*+ GlobalLock() */的才会执行这里，本地事务才会带/*+ GlobalLock() */，是用来预防
 func (executor *prepareGlobalLockExecutor) Executable(ctx context.Context, lockRetryInterval time.Duration, lockRetryTimes int) (bool, error) {
 	beforeImage, err := executor.BeforeImage(ctx)
 	if err != nil {

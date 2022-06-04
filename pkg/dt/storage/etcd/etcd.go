@@ -104,18 +104,18 @@ func (s *store) AddBranchSession(ctx context.Context, branchSession *api.BranchS
 	if branchSession.Type == api.AT && branchSession.LockKey != "" {
 		rowKeys := misc.CollectRowKeys(branchSession.LockKey, branchSession.ResourceID)
 
-		txn := s.client.Txn(ctx)	//生成一个txn指针对象
+		txn := s.client.Txn(ctx)	//etcd事务
 		var cmpSlice []clientv3.Cmp
 		for _, rowKey := range rowKeys {
-			cmpSlice = append(cmpSlice, notFound(rowKey))	//这段没看懂？？？感觉是etcd的事务
+			cmpSlice = append(cmpSlice, notFound(rowKey))	//如果这些key不存在才执行
 		}
-		txn = txn.If(cmpSlice...)	//不懂？？？
+		txn = txn.If(cmpSlice...)
 
 		var ops []clientv3.Op
 		for _, rowKey := range rowKeys {
 			lockKey := fmt.Sprintf("lk/%s/%s", branchSession.XID, rowKey)	//lk/gs/aggregationSvc/9169597303674880004/order^^^`order`.`so_master`^^^3742195289
 			ops = append(ops, clientv3.OpPut(lockKey, rowKey))
-			ops = append(ops, clientv3.OpPut(rowKey, lockKey))	////感觉是在事务里锁住了一行
+			ops = append(ops, clientv3.OpPut(rowKey, lockKey))	//不存在，则lockKey和rowKey互相赋值
 		}
 		txn.Then(ops...)
 

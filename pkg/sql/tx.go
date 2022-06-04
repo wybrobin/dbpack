@@ -31,7 +31,7 @@ type Tx struct {
 	db     *DB
 	conn   *driver.BackendConnection
 }
-
+//！！！comquery模式下的关键函数，前后分离执行的分界点
 func (tx *Tx) Query(ctx context.Context, query string) (proto.Result, uint16, error) {
 	tx.db.inflightRequests.Inc()
 	defer tx.db.inflightRequests.Dec()

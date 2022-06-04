@@ -443,9 +443,9 @@ func (conn *BackendConnection) WriteComQuery(query string) error {
 	// This is a new command, need to reset the sequence.
 	conn.ResetSequence()
 
-	data := conn.StartEphemeralPacket(len(query) + 1)
-	data[0] = constant.ComQuery
-	copy(data[1:], query)
+	data := conn.StartEphemeralPacket(len(query) + 1)	//临时缓冲区
+	data[0] = constant.ComQuery	//把命令号放到临时缓冲区的第0位
+	copy(data[1:], query)	//将语句放到后面
 	if err := conn.WriteEphemeralPacket(); err != nil {
 		return err2.NewSQLError(constant.CRServerGone, constant.SSUnknownSQLState, err.Error())
 	}
