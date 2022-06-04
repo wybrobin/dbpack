@@ -140,6 +140,7 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 	switch stmt := queryStmt.(type) {
 	case *ast.SetStmt:
 		if shouldStartTransaction(stmt) {
+			// TODO add metrics
 			tx, result, err = db.Begin(ctx)
 			if err != nil {
 				return nil, 0, err
@@ -155,6 +156,7 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 			return db.Query(ctx, sql)
 		}
 	case *ast.BeginStmt:
+		// TODO add metrics
 		tx, result, err = db.Begin(ctx)
 		if err != nil {
 			return nil, 0, err
@@ -168,6 +170,7 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 		}
 		defer executor.localTransactionMap.Delete(connectionID)
 		tx = txi.(proto.Tx)
+		// TODO add metrics
 		if result, err = tx.Commit(ctx); err != nil {
 			return nil, 0, err
 		}
@@ -179,6 +182,7 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 		}
 		defer executor.localTransactionMap.Delete(connectionID)
 		tx = txi.(proto.Tx)
+		// TODO add metrics
 		if result, err = tx.Rollback(ctx); err != nil {
 			return nil, 0, err
 		}

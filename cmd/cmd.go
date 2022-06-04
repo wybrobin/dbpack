@@ -130,7 +130,6 @@ var (
 			}
 
 			dbpack := server.NewServer()
-
 			//都是使用net.Listen监听，mysql的listener多个executor，因为mysql要透传到数据库，http的listener多个filters，因为http只让合法的路径通过
 			for _, listenerConf := range conf.Listeners {
 				switch listenerConf.ProtocolType {

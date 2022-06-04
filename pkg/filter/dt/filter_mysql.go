@@ -195,7 +195,7 @@ func (f *_mysqlFilter) registerBranchTransaction(ctx context.Context, xid, resou
 		ApplicationData: nil,
 	}
 	for retryCount := 0; retryCount < f.lockRetryTimes; retryCount++ {
-		_, branchID, err = dt.GetDistributedTransactionManager().BranchRegister(context.Background(), br)	//注册分支事务到etcd，并锁住主键，并关联全局事务
+		_, branchID, err = dt.GetDistributedTransactionManager().BranchRegister(ctx, br)	//注册分支事务到etcd，并锁住主键，并关联全局事务
 		if err == nil {
 			break
 		}
