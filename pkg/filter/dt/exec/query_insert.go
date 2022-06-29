@@ -19,6 +19,7 @@ package exec
 import (
 	"context"
 	"fmt"
+	"github.com/cectc/dbpack/pkg/misc"
 	"strings"
 
 	"github.com/cectc/dbpack/pkg/driver"
@@ -53,12 +54,78 @@ func (executor *queryInsertExecutor) BeforeImage(ctx context.Context) (*schema.T
 }
 
 func (executor *queryInsertExecutor) AfterImage(ctx context.Context) (*schema.TableRecords, error) {
-	//var afterImage *schema.TableRecords
+	//tableMeta, err := executor.GetTableMeta(ctx)
+	//if err != nil {
+	//	return nil, err
+	//}
+	////fmt.Println(tableMeta.Columns)
+	//fmt.Println(tableMeta.GetPKName())
+	//
+	//for _, elem := range executor.stmt.Lists[0] {
+	//	var sb strings.Builder
+	//	if err := elem.Restore(format.NewRestoreCtx(format.DefaultRestoreFlags, &sb)); err != nil {
+	//		log.Panic(err)
+	//	}
+	//	fmt.Println(sb.String())
+	//}
+	//
+	//fmt.Println("===")
+	//for _, col := range executor.stmt.Columns {	//这个和stmt.Lists[0]是匹配的，仿照prepare_insert，拿到主键，然后组成where语句就行了，
+	//		//其他的照着query_delete做就弄出image了
+	//	fmt.Println(col.Name)
+	//}
 
-	fmt.Println(executor.stmt.Lists)
 
+	var afterImage *schema.TableRecords	//定义返回值
+	var err error
+	pkValues, err := executor.getPKValuesByColumn(ctx)	//拿到插入数据主键的值
+	if err != nil {
+		return nil, err
+	}
+	if executor.getPKIndex(ctx) >= 0 {
+		afterImage, err = executor.buildTableRecords(ctx, pkValues)	//afterImage 是 TableRecords 类型
+	} else {
+		pk, _ := executor.result.LastInsertId()
+		afterImage, err = executor.buildTableRecords(ctx, []interface{}{pk})
+	}
+	if err != nil {
+		return nil, err
+	}
+	return afterImage, nil
+}
 
-	return nil, nil
+func (executor *queryInsertExecutor) buildTableRecords(ctx context.Context, pkValues []interface{}) (*schema.TableRecords, error) {
+	tableMeta, err := executor.GetTableMeta(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	afterImageSql := executor.buildAfterImageSql(tableMeta, pkValues)
+	result, _, err := executor.conn.ExecuteWithWarningCount(afterImageSql, true)
+	if err != nil {
+		return nil, err
+	}
+	return schema.BuildTextRecords(tableMeta, result), nil
+}
+
+func (executor *queryInsertExecutor) buildAfterImageSql(tableMeta schema.TableMeta, pkValues []interface{}) string {
+	var b strings.Builder
+	b.WriteString("SELECT ")
+	var i = 0
+	columnCount := len(tableMeta.Columns)	//总共多少列，乱序的
+	for _, column := range tableMeta.Columns {
+		b.WriteString(misc.CheckAndReplace(column))	////检查是不是mysql的关键词，如果是的话，则加上``
+		i = i + 1
+		if i < columnCount {	//不是最后一行写,
+			b.WriteByte(',')
+		} else {	//是最后一行，写空格
+			b.WriteByte(' ')
+		}
+	}
+	b.WriteString(fmt.Sprintf("FROM %s ", executor.GetTableName()))	//from 表名
+	b.WriteString(fmt.Sprintf(" WHERE `%s` IN ", tableMeta.GetPKName()))	//where 主键名 in
+	b.WriteString(misc.MysqlAppendInParamWithValue(pkValues))
+	return b.String()
 }
 
 func (executor *queryInsertExecutor) GetTableMeta(ctx context.Context) (schema.TableMeta, error) {
@@ -73,4 +140,66 @@ func (executor *queryInsertExecutor) GetTableName() string {
 		log.Panic(err)
 	}
 	return sb.String()
+}
+
+func (executor *queryInsertExecutor) getPKValuesByColumn(ctx context.Context) ([]interface{}, error) {
+	pkValues := make([]interface{}, 0)
+	//columnLen := executor.getColumnLen(ctx)	//获取插入的列数
+	pkIndex := executor.getPKIndex(ctx)	//返回主键的下标
+	for j := range executor.stmt.Lists {
+		for i, value := range executor.stmt.Lists[j] {
+			if i == pkIndex {
+				var sb strings.Builder
+				if err := value.Restore(format.NewRestoreCtx(format.DefaultRestoreFlags, &sb)); err != nil {
+					log.Panic(err)
+				}
+				//fmt.Println(sb.String())
+				pkValues = append(pkValues, sb.String())
+				break
+			}
+		}
+	}
+
+	return pkValues, nil
+}
+
+func (executor *queryInsertExecutor) getPKIndex(ctx context.Context) int {
+	insertColumns := executor.GetInsertColumns()
+	tableMeta, _ := executor.GetTableMeta(ctx)
+
+	if insertColumns != nil && len(insertColumns) > 0 {
+		for i, columnName := range insertColumns {
+			if strings.EqualFold(tableMeta.GetPKName(), columnName) {
+				return i
+			}
+		}
+	} else {
+		allColumns := tableMeta.Columns
+		var idx = 0
+		for _, column := range allColumns {
+			if strings.EqualFold(tableMeta.GetPKName(), column) {
+				return idx
+			}
+			idx = idx + 1
+		}
+	}
+	return -1
+}
+
+func (executor *queryInsertExecutor) getColumnLen(ctx context.Context) int {
+	insertColumns := executor.GetInsertColumns()
+	if insertColumns != nil {
+		return len(insertColumns)
+	}
+	tableMeta, _ := executor.GetTableMeta(ctx)
+
+	return len(tableMeta.Columns)
+}
+
+func (executor *queryInsertExecutor) GetInsertColumns() []string {
+	result := make([]string, 0)
+	for _, col := range executor.stmt.Columns {
+		result = append(result, col.Name.String())
+	}
+	return result
 }

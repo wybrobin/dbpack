@@ -37,7 +37,7 @@ func (meta TableMeta) GetPrimaryKeyMap() map[string]ColumnMeta {
 			}
 		}
 	}
-	if len(pk) > 1 {	//联合主键不支持？？？
+	if len(pk) > 1 {	//联合主键不支持？，对的
 		log.Panicf("%s contains multi PK, but current not support.", meta.TableName)
 	}
 	if len(pk) < 1 {
