@@ -19,13 +19,13 @@ package exec
 import (
 	"context"
 	"fmt"
-	"github.com/cectc/dbpack/pkg/misc"
 	"strings"
 
 	"github.com/cectc/dbpack/pkg/driver"
 	"github.com/cectc/dbpack/pkg/dt/schema"
 	"github.com/cectc/dbpack/pkg/log"
 	"github.com/cectc/dbpack/pkg/meta"
+	"github.com/cectc/dbpack/pkg/misc"
 	"github.com/cectc/dbpack/pkg/proto"
 	"github.com/cectc/dbpack/pkg/resource"
 	"github.com/cectc/dbpack/third_party/parser/ast"
@@ -54,31 +54,12 @@ func (executor *queryInsertExecutor) BeforeImage(ctx context.Context) (*schema.T
 }
 
 func (executor *queryInsertExecutor) AfterImage(ctx context.Context) (*schema.TableRecords, error) {
-	//tableMeta, err := executor.GetTableMeta(ctx)
-	//if err != nil {
-	//	return nil, err
-	//}
-	////fmt.Println(tableMeta.Columns)
-	//fmt.Println(tableMeta.GetPKName())
-	//
-	//for _, elem := range executor.stmt.Lists[0] {
-	//	var sb strings.Builder
-	//	if err := elem.Restore(format.NewRestoreCtx(format.DefaultRestoreFlags, &sb)); err != nil {
-	//		log.Panic(err)
-	//	}
-	//	fmt.Println(sb.String())
-	//}
-	//
-	//fmt.Println("===")
-	//for _, col := range executor.stmt.Columns {	//这个和stmt.Lists[0]是匹配的，仿照prepare_insert，拿到主键，然后组成where语句就行了，
-	//		//其他的照着query_delete做就弄出image了
-	//	fmt.Println(col.Name)
-	//}
-
-
-	var afterImage *schema.TableRecords	//定义返回值
-	var err error
-	pkValues, err := executor.getPKValuesByColumn(ctx)	//拿到插入数据主键的值
+	var (
+		afterImage *schema.TableRecords
+		pkValues   []interface{}
+		err        error
+	)
+	pkValues, err = executor.getPKValuesByColumn(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -111,19 +92,17 @@ func (executor *queryInsertExecutor) buildTableRecords(ctx context.Context, pkVa
 func (executor *queryInsertExecutor) buildAfterImageSql(tableMeta schema.TableMeta, pkValues []interface{}) string {
 	var b strings.Builder
 	b.WriteString("SELECT ")
-	var i = 0
 	columnCount := len(tableMeta.Columns)	//总共多少列，乱序的
-	for _, column := range tableMeta.Columns {
-		b.WriteString(misc.CheckAndReplace(column))	////检查是不是mysql的关键词，如果是的话，则加上``
-		i = i + 1
-		if i < columnCount {	//不是最后一行写,
+	for i, column := range tableMeta.Columns {
+		b.WriteString(misc.CheckAndReplace(column))	//检查是不是mysql的关键词，如果是的话，则加上``
+		if i < columnCount-1 {	//不是最后一行写,
 			b.WriteByte(',')
 		} else {	//是最后一行，写空格
 			b.WriteByte(' ')
 		}
 	}
-	b.WriteString(fmt.Sprintf("FROM %s ", executor.GetTableName()))	//from 表名
-	b.WriteString(fmt.Sprintf(" WHERE `%s` IN ", tableMeta.GetPKName()))	//where 主键名 in
+	b.WriteString(fmt.Sprintf("FROM %s ", executor.GetTableName()))
+	b.WriteString(fmt.Sprintf("WHERE `%s` IN ", tableMeta.GetPKName()))
 	b.WriteString(misc.MysqlAppendInParamWithValue(pkValues))
 	return b.String()
 }
@@ -144,7 +123,6 @@ func (executor *queryInsertExecutor) GetTableName() string {
 
 func (executor *queryInsertExecutor) getPKValuesByColumn(ctx context.Context) ([]interface{}, error) {
 	pkValues := make([]interface{}, 0)
-	//columnLen := executor.getColumnLen(ctx)	//获取插入的列数
 	pkIndex := executor.getPKIndex(ctx)	//返回主键的下标
 	for j := range executor.stmt.Lists {
 		for i, value := range executor.stmt.Lists[j] {
@@ -153,7 +131,6 @@ func (executor *queryInsertExecutor) getPKValuesByColumn(ctx context.Context) ([
 				if err := value.Restore(format.NewRestoreCtx(format.DefaultRestoreFlags, &sb)); err != nil {
 					log.Panic(err)
 				}
-				//fmt.Println(sb.String())
 				pkValues = append(pkValues, sb.String())
 				break
 			}
@@ -167,20 +144,16 @@ func (executor *queryInsertExecutor) getPKIndex(ctx context.Context) int {
 	insertColumns := executor.GetInsertColumns()
 	tableMeta, _ := executor.GetTableMeta(ctx)
 
-	if insertColumns != nil && len(insertColumns) > 0 {
-		for i, columnName := range insertColumns {
-			if strings.EqualFold(tableMeta.GetPKName(), columnName) {
-				return i
-			}
+	for i, columnName := range insertColumns {
+		if strings.EqualFold(tableMeta.GetPKName(), columnName) {
+			return i
 		}
-	} else {
-		allColumns := tableMeta.Columns
-		var idx = 0
-		for _, column := range allColumns {
-			if strings.EqualFold(tableMeta.GetPKName(), column) {
-				return idx
-			}
-			idx = idx + 1
+	}
+
+	allColumns := tableMeta.Columns
+	for i, column := range allColumns {
+		if strings.EqualFold(tableMeta.GetPKName(), column) {
+			return i
 		}
 	}
 	return -1

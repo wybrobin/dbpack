@@ -32,6 +32,7 @@ import (
 
 	"github.com/cectc/dbpack/pkg/constant"
 	err2 "github.com/cectc/dbpack/pkg/errors"
+	"github.com/cectc/dbpack/pkg/log"
 	"github.com/cectc/dbpack/pkg/misc"
 	"github.com/cectc/dbpack/pkg/packet"
 	"github.com/cectc/dbpack/pkg/proto"
@@ -79,21 +80,23 @@ type Conn struct {
 	// If there are any ongoing reads or writes, they may get interrupted.
 	conn net.Conn
 
-	// ConnectionID is set:
+	// connectionID is set:
 	// - at Connect() time for clients, with the value returned by
 	// the server.
 	// - at accept time for the server.
-	ConnectionID uint32
+	connectionID uint32
+
+	userName string
 
 	// closed is set to true when Close() is called on the connection.
 	closed sync2.AtomicBool
 
-	// StatusFlags are the status flags we will base our returned flags on.
+	// statusFlags are the status flags we will base our returned flags on.
 	// This is a bit field, with values documented in constants.go.
-	// An interesting value here would be ServerStatusAutocommit.
+	// An interesting value here would be constant.ServerStatusAutocommit.
 	// It is only used by the server. These flags can be changed
 	// by Handler methods.
-	StatusFlags uint16
+	statusFlags uint16
 
 	// Packet encoding variables.
 	sequence       uint8
@@ -122,6 +125,7 @@ func NewConn(conn net.Conn) *Conn {
 		conn:           conn,
 		closed:         sync2.NewAtomicBool(false),
 		bufferedReader: bufio.NewReaderSize(conn, connBufferSize),
+		statusFlags:    constant.ServerStatusAutocommit,
 	}
 }
 
@@ -599,7 +603,7 @@ func (c *Conn) WriteFields(capabilities uint32, fields []*Field) error {
 	// Now send an EOF packet.
 	if capabilities&constant.CapabilityClientDeprecateEOF == 0 {
 		// With CapabilityClientDeprecateEOF, we do not send this EOF.
-		if err := c.WriteEOFPacket(c.StatusFlags, 0); err != nil {
+		if err := c.WriteEOFPacket(c.statusFlags, 0); err != nil {
 			return err
 		}
 	}
@@ -690,7 +694,7 @@ func (c *Conn) WritePrepare(capabilities uint32, prepare *proto.Stmt) error {
 		// Now send an EOF packet.
 		if capabilities&constant.CapabilityClientDeprecateEOF == 0 {
 			// With CapabilityClientDeprecateEOF, we do not send this EOF.
-			if err := c.WriteEOFPacket(c.StatusFlags, 0); err != nil {
+			if err := c.WriteEOFPacket(c.statusFlags, 0); err != nil {
 				return err
 			}
 		}
@@ -798,7 +802,7 @@ func (c *Conn) WriteRowsDirect(result *MergeResult) error {
 func (c *Conn) WriteEndResult(capabilities uint32, more bool, affectedRows, lastInsertID uint64, warnings uint16) error {
 	// Send either an EOF, or an OK packet.
 	// See doc.go.
-	flags := c.StatusFlags
+	flags := c.statusFlags
 	if more {
 		flags |= constant.ServerMoreResultsExists
 	}
@@ -916,26 +920,44 @@ func (c *Conn) GetTLSClientCerts() []*x509.Certificate {
 	return nil
 }
 
+func (c *Conn) SetConnectionID(connectionID uint32) {
+	c.connectionID = connectionID
+}
+
+func (c *Conn) SetUserName(userName string) {
+	c.userName = userName
+}
+
 // RemoteAddr returns the underlying socket RemoteAddr().
 func (c *Conn) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
 }
 
 // ID returns the MySQL connection ID for this connection.
-func (c *Conn) ID() int64 {
-	return int64(c.ConnectionID)
+func (c *Conn) ID() uint32 {
+	return c.connectionID
+}
+
+func (c *Conn) UserName() string {
+	return c.userName
+}
+
+func (c *Conn) StatusFlags() uint16 {
+	return c.statusFlags
 }
 
 // Ident returns a useful identification string for error logging
 func (c *Conn) String() string {
-	return fmt.Sprintf("client %v (%s)", c.ConnectionID, c.RemoteAddr().String())
+	return fmt.Sprintf("client %v (%s)", c.connectionID, c.RemoteAddr().String())
 }
 
 // Close closes the connection. It can be called from a different go
 // routine to interrupt the current connection.
 func (c *Conn) Close() {
 	if c.closed.CompareAndSwap(false, true) {
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			log.Errorf("connection close error, connection id: %v, error: %s", c.connectionID, err)
+		}
 	}
 }
 

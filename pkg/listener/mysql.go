@@ -21,12 +21,15 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha1"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"strings"
 	"sync"
+
+	"github.com/cectc/dbpack/pkg/tracing"
 
 	"github.com/pkg/errors"
 	"github.com/uber-go/atomic"
@@ -138,7 +141,6 @@ func (l *MysqlListener) Listen() {
 
 		l.connectionID++
 		connectionID := l.connectionID
-
 		go l.handle(conn, connectionID)
 	}
 }
@@ -152,7 +154,7 @@ func (l *MysqlListener) Close() {
 //处理mysql客户端连接进来的请求
 func (l *MysqlListener) handle(conn net.Conn, connectionID uint32) {
 	c := mysql.NewConn(conn)
-	c.ConnectionID = connectionID
+	c.SetConnectionID(connectionID)
 
 	// Catch panics, and close the connection in any case.
 	defer func() {
@@ -160,7 +162,9 @@ func (l *MysqlListener) handle(conn net.Conn, connectionID uint32) {
 			log.Errorf("mysql_server caught panic:\n%v", x)
 		}
 
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			log.Errorf("connection close error, connection id: %v, error: %s", l.connectionID, err)
+		}
 		l.executor.ConnectionClose(proto.WithConnectionID(context.Background(), l.connectionID))
 	}()
 
@@ -176,7 +180,7 @@ func (l *MysqlListener) handle(conn net.Conn, connectionID uint32) {
 	}
 
 	// Negotiation worked, send OK packet.
-	if err := c.WriteOKPacket(0, 0, c.StatusFlags, 0); err != nil {
+	if err := c.WriteOKPacket(0, 0, c.StatusFlags(), 0); err != nil {
 		log.Errorf("Cannot write OK packet to %s: %v", c, err)
 		return
 	}
@@ -185,7 +189,8 @@ func (l *MysqlListener) handle(conn net.Conn, connectionID uint32) {
 	//正式进入与mysql客户端的交互
 	for {
 		c.ResetSequence()
-		data, err := c.ReadEphemeralPacket()
+		var data []byte
+		data, err = c.ReadEphemeralPacket()
 		if err != nil {
 			c.RecycleReadPacket()
 			return
@@ -195,11 +200,17 @@ func (l *MysqlListener) handle(conn net.Conn, connectionID uint32) {
 		copy(content, data)
 		ctx := proto.WithVariableMap(context.Background())
 		ctx = proto.WithConnectionID(ctx, connectionID)	//context放入每来一个连接就自增的connectionID
+		ctx = proto.WithUserName(ctx, c.UserName())
+		ctx = proto.WithRemoteAddr(ctx, c.RemoteAddr().String())
 		ctx = proto.WithSchema(ctx, l.schemaName)	//context放入数据库名
-		err = l.ExecuteCommand(ctx, c, content)	//正式处理mysql的请求
+		newCtx, span := tracing.GetTraceSpan(ctx, "mysql_handle")
+		err = l.ExecuteCommand(newCtx, c, content)	//正式处理mysql的请求
 		if err != nil {
+			tracing.RecordErrorSpan(span, err)
+			span.End()
 			return
 		}
+		span.End()
 	}
 }
 
@@ -241,6 +252,7 @@ func (l *MysqlListener) handshake(c *mysql.Conn) error {
 		log.Errorf("Error authenticating user using MySQL native password: %v", err)
 		return err
 	}
+	c.SetUserName(user)
 	return nil
 }
 
@@ -289,7 +301,7 @@ func (l *MysqlListener) writeHandshakeV10(c *mysql.Conn, enableTLS bool, salt []
 	pos = misc.WriteNullString(data, pos, l.conf.ServerVersion)
 
 	// Add connectionID in.
-	pos = misc.WriteUint32(data, pos, c.ConnectionID)
+	pos = misc.WriteUint32(data, pos, c.ID())
 
 	pos += copy(data[pos:], salt[:8])
 
@@ -511,25 +523,30 @@ func scramblePassword(scramble []byte, password string) []byte {
 }
 
 func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data []byte) error {
+	newCtx, span := tracing.GetTraceSpan(ctx, "mysql_exec_command")
+	defer span.End()
+
 	commandType := data[0]
 	switch commandType {
 	case constant.ComQuit:	//quit命令
 		// https://dev.constant.Com/doc/internals/en/com-quit.html
 		c.RecycleReadPacket()
-		connectionID := proto.ConnectionID(ctx)
-		l.executor.ConnectionClose(proto.WithConnectionID(context.Background(), connectionID))
+		connectionID := proto.ConnectionID(newCtx)
+		l.executor.ConnectionClose(proto.WithConnectionID(newCtx, connectionID))
 		log.Debugf("connection closed, id: %d", connectionID)
 		return errors.New("ComQuit")
 	case constant.ComInitDB:	//use db_name 命令
 		db := string(data[1:])
 		c.RecycleReadPacket()
 		l.schemaName = db
-		err := l.executor.ExecuteUseDB(ctx, db)
+		err := l.executor.ExecuteUseDB(newCtx, db)
 		if err != nil {
+			tracing.RecordErrorSpan(span, err)
 			return err
 		}
-		if err := c.WriteOKPacket(0, 0, c.StatusFlags, 0); err != nil {
+		if err := c.WriteOKPacket(0, 0, c.StatusFlags(), 0); err != nil {
 			log.Errorf("Error writing ComInitDB result to %s: %v", c, err)
+			tracing.RecordErrorSpan(span, err)
 			return err
 		}
 	case constant.ComQuery:	//字符串替换拼接请求，不含?的，//START TRANSACTION、COMMIT
@@ -538,6 +555,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 			defer func() {
 				if err := c.EndWriterBuffering(); err != nil {
 					log.Errorf("conn %v: flush() failed: %v", c.ID(), err)
+					tracing.RecordErrorSpan(span, err)
 				}
 			}()
 
@@ -549,18 +567,21 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 			if err != nil {
 				if writeErr := c.WriteErrorPacketFromError(err); writeErr != nil {
 					log.Error("Error writing query error to client %v: %v", l.connectionID, writeErr)
+					tracing.RecordErrorSpan(span, writeErr)
 					return writeErr
 				}
 				return nil
 			}
 			stmt.Accept(&visitor.ParamVisitor{})
 
-			ctx := proto.WithCommandType(ctx, commandType)
+			ctx = proto.WithCommandType(newCtx, commandType)
 			ctx = proto.WithQueryStmt(ctx, stmt)
-			result, warn, err := l.executor.ExecutorComQuery(ctx, query)	//分为SDB、RWS、SHD三种模式
+			ctx = proto.WithSqlText(ctx, query)
+			result, warn, err := l.executor.ExecutorComQuery(ctx, query)
 			if err != nil {
 				if writeErr := c.WriteErrorPacketFromError(err); writeErr != nil {
 					log.Error("Error writing query error to client %v: %v", l.connectionID, writeErr)
+					tracing.RecordErrorSpan(span, writeErr)
 					return writeErr
 				}
 				return nil
@@ -573,14 +594,20 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 					// We should not send any more packets after this, but make sure
 					// to extract the affected rows and last insert id from the result
 					// struct here since clients expect it.
-					return c.WriteOKPacket(rlt.AffectedRows, rlt.InsertId, c.StatusFlags, warn)
+					flag := c.StatusFlags()
+					if l.executor.InLocalTransaction(ctx) {
+						flag = flag | constant.ServerStatusInTrans
+					}
+					return c.WriteOKPacket(rlt.AffectedRows, rlt.InsertId, flag, warn)
 				}
 				err = c.WriteFields(l.capabilities, rlt.Fields)
 				if err != nil {
+					tracing.RecordErrorSpan(span, err)
 					return err
 				}
 				err = c.WriteRows(rlt)
 				if err != nil {
+					tracing.RecordErrorSpan(span, err)
 					return err
 				}
 			}
@@ -592,32 +619,37 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 					// We should not send any more packets after this, but make sure
 					// to extract the affected rows and last insert id from the result
 					// struct here since clients expect it.
-					return c.WriteOKPacket(rlt.AffectedRows, rlt.InsertId, c.StatusFlags, warn)
+					return c.WriteOKPacket(rlt.AffectedRows, rlt.InsertId, c.StatusFlags(), warn)
 				}
 				err = c.WriteFields(l.capabilities, rlt.Fields)
 				if err != nil {
+					tracing.RecordErrorSpan(span, err)
 					return err
 				}
 				err = c.WriteRowsDirect(rlt)
 				if err != nil {
+					tracing.RecordErrorSpan(span, err)
 					return err
 				}
 			}
-			if err := c.WriteEndResult(l.capabilities, false, 0, 0, warn); err != nil {
+			if err = c.WriteEndResult(l.capabilities, false, 0, 0, warn); err != nil {
 				log.Errorf("Error writing result to %s: %v", c, err)
+				tracing.RecordErrorSpan(span, err)
 				return err
 			}
 			return nil
 		}()
 		if err != nil {
+			tracing.RecordErrorSpan(span, err)
 			return err
 		}
 	case constant.ComPing:
 		c.RecycleReadPacket()
 
 		// Return error if MysqlListener was shut down and OK otherwise
-		if err := c.WriteOKPacket(0, 0, c.StatusFlags, 0); err != nil {
+		if err := c.WriteOKPacket(0, 0, c.StatusFlags(), 0); err != nil {
 			log.Errorf("Error writing ComPing result to %s: %v", c, err)
+			tracing.RecordErrorSpan(span, err)
 			return err
 		}
 	case constant.ComFieldList:	// 获取数据表字段信息 show column？
@@ -626,12 +658,13 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 		wildcard := string(data[index+1:])
 		c.RecycleReadPacket()
 
-		fields, err := l.executor.ExecuteFieldList(ctx, table, wildcard)
+		fields, err := l.executor.ExecuteFieldList(newCtx, table, wildcard)
 		if err != nil {
 			log.Errorf("Conn %v: Error write field list: %v", c, err)
 			if writeErr := c.WriteErrorPacketFromError(err); writeErr != nil {
 				// If we can't even write the error, we're done.
 				log.Errorf("Conn %v: Error write field list error: %v", c, writeErr)
+				tracing.RecordErrorSpan(span, writeErr)
 				return writeErr
 			}
 		}
@@ -642,6 +675,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 		}
 		err = c.WriteFields(l.capabilities, result.Fields)
 		if err != nil {
+			tracing.RecordErrorSpan(span, err)
 			return err
 		}
 	case constant.ComPrepare:	//22 预处理SQL，把StatementID对应的stmt暂存起来给23传参时再取出
@@ -652,15 +686,16 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 		l.statementID.Inc()
 		stmt := &proto.Stmt{
 			StatementID: l.statementID.Load(),
-			PrepareStmt: query,
+			SqlText:     query,
 		}
 		p := parser.New()
-		act, err := p.ParseOneStmt(stmt.PrepareStmt, "", "")
+		act, err := p.ParseOneStmt(stmt.SqlText, "", "")
 		if err != nil {
 			log.Errorf("Conn %v: Error parsing prepared statement: %v", c, err)
 			if writeErr := c.WriteErrorPacketFromError(err); writeErr != nil {
 				// If we can't even write the error, we're done.
 				log.Errorf("Conn %v: Error writing prepared statement error: %v", c, writeErr)
+				tracing.RecordErrorSpan(span, writeErr)
 				return writeErr
 			}
 		}
@@ -678,7 +713,8 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 
 		l.stmts.Store(stmt.StatementID, stmt)	//把StatementID对应的stmt暂存起来
 
-		if err := c.WritePrepare(l.capabilities, stmt); err != nil {
+		if err = c.WritePrepare(l.capabilities, stmt); err != nil {
+			tracing.RecordErrorSpan(span, err)
 			return err
 		}
 	case constant.ComStmtExecute:	//23 执行预处理，update、insert都走这里，这里应该是传参数了
@@ -687,6 +723,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 			defer func() {
 				if err := c.EndWriterBuffering(); err != nil {
 					log.Errorf("conn %v: flush() failed: %v", c.ID(), err)
+					tracing.RecordErrorSpan(span, err)
 				}
 			}()
 			stmtID, _, err := packet.ParseComStmtExecute(l.stmts, data)
@@ -705,6 +742,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 				if writeErr := c.WriteErrorPacketFromError(err); writeErr != nil {
 					// If we can't even write the error, we're done.
 					log.Error("Error writing query error to client %v: %v", l.connectionID, writeErr)
+					tracing.RecordErrorSpan(span, writeErr)
 					return writeErr
 				}
 				return nil
@@ -714,12 +752,14 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 			stmt := si.(*proto.Stmt)
 			stmt.ParamData = data	//将绑定的参数值放到stmt的ParamData里
 
-			ctx := proto.WithCommandType(ctx, commandType)
+			ctx = proto.WithCommandType(newCtx, commandType)
 			ctx = proto.WithPrepareStmt(ctx, stmt)
-			result, warn, err := l.executor.ExecutorComStmtExecute(ctx, stmt)	//正式开始执行
+			ctx = proto.WithSqlText(ctx, stmt.SqlText)
+			result, warn, err := l.executor.ExecutorComStmtExecute(ctx, stmt)
 			if err != nil {
 				if writeErr := c.WriteErrorPacketFromError(err); writeErr != nil {
 					log.Error("Error writing query error to client %v: %v", l.connectionID, writeErr)
+					tracing.RecordErrorSpan(span, writeErr)
 					return writeErr
 				}
 				return nil
@@ -732,15 +772,21 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 					// We should not send any more packets after this, but make sure
 					// to extract the affected rows and last insert id from the result
 					// struct here since clients expect it.
-					return c.WriteOKPacket(rlt.AffectedRows, rlt.InsertId, c.StatusFlags, warn)
+					flag := c.StatusFlags()
+					if l.executor.InLocalTransaction(ctx) {
+						flag = flag | constant.ServerStatusInTrans
+					}
+					return c.WriteOKPacket(rlt.AffectedRows, rlt.InsertId, flag, warn)
 				}
 
 				err = c.WriteFields(l.capabilities, rlt.Fields)
 				if err != nil {
+					tracing.RecordErrorSpan(span, err)
 					return err
 				}
 				err = c.WriteBinaryRows(rlt)
 				if err != nil {
+					tracing.RecordErrorSpan(span, err)
 					return err
 				}
 			}
@@ -752,24 +798,28 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 					// We should not send any more packets after this, but make sure
 					// to extract the affected rows and last insert id from the result
 					// struct here since clients expect it.
-					return c.WriteOKPacket(rlt.AffectedRows, rlt.InsertId, c.StatusFlags, warn)
+					return c.WriteOKPacket(rlt.AffectedRows, rlt.InsertId, c.StatusFlags(), warn)
 				}
 				err = c.WriteFields(l.capabilities, rlt.Fields)
 				if err != nil {
+					tracing.RecordErrorSpan(span, err)
 					return err
 				}
 				err = c.WriteRowsDirect(rlt)
 				if err != nil {
+					tracing.RecordErrorSpan(span, err)
 					return err
 				}
 			}
-			if err := c.WriteEndResult(l.capabilities, false, 0, 0, warn); err != nil {
+			if err = c.WriteEndResult(l.capabilities, false, 0, 0, warn); err != nil {
 				log.Errorf("Error writing result to %s: %v", c, err)
+				tracing.RecordErrorSpan(span, err)
 				return err
 			}
 			return nil
 		}()
 		if err != nil {
+			tracing.RecordErrorSpan(span, err)
 			return err
 		}
 	case constant.ComStmtClose: // no response	销毁预处理语句
@@ -779,8 +829,22 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 			l.stmts.Delete(stmtID)
 		}
 	case constant.ComStmtSendLongData: // no response	发送BLOB类型数据
-		values := make([]byte, len(data))
-		copy(values, data)
+		if len(data) < 6 {
+			return err2.ErrMalformedPkt
+		}
+
+		stmtID := int(binary.LittleEndian.Uint32(data[0:4]))
+
+		si, ok := l.stmts.Load(stmtID)
+		if !ok {
+			return errors.Errorf("statement not found, statement id: %v", stmtID)
+		}
+		stmt := si.(*proto.Stmt)
+
+		paramID := int(binary.LittleEndian.Uint16(data[4:6]))
+		parameterID := fmt.Sprintf("v%d", paramID+1)
+		stmt.HasLongDataParam = true
+		stmt.BindVars[parameterID] = data[6:]
 	case constant.ComStmtReset:	//清除预处理语句参数缓存
 		stmtID, _, ok := misc.ReadUint32(data, 1)
 		c.RecycleReadPacket()
@@ -789,7 +853,7 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 			stmt := si.(*proto.Stmt)
 			stmt.BindVars = make(map[string]interface{}, 0)
 		}
-		return c.WriteOKPacket(0, 0, c.StatusFlags, 0)
+		return c.WriteOKPacket(0, 0, c.StatusFlags(), 0)
 	case constant.ComSetOption:	//设置语句选项
 		operation, _, ok := misc.ReadUint16(data, 1)
 		c.RecycleReadPacket()
@@ -803,17 +867,20 @@ func (l *MysqlListener) ExecuteCommand(ctx context.Context, c *mysql.Conn, data 
 				log.Errorf("Got unhandled packet (ComSetOption default) from client %v, returning error: %v", l.connectionID, data)
 				if err := c.WriteErrorPacket(constant.ERUnknownComError, constant.SSUnknownComError, "error handling packet: %v", data); err != nil {
 					log.Errorf("Error writing error packet to client: %v", err)
+					tracing.RecordErrorSpan(span, err)
 					return err
 				}
 			}
 			if err := c.WriteEndResult(l.capabilities, false, 0, 0, 0); err != nil {
 				log.Errorf("Error writeEndResult error %v ", err)
+				tracing.RecordErrorSpan(span, err)
 				return err
 			}
 		} else {
 			log.Errorf("Got unhandled packet (ComSetOption else) from client %v, returning error: %v", l.connectionID, data)
 			if err := c.WriteErrorPacket(constant.ERUnknownComError, constant.SSUnknownComError, "error handling packet: %v", data); err != nil {
 				log.Errorf("Error writing error packet to client: %v", err)
+				tracing.RecordErrorSpan(span, err)
 				return err
 			}
 		}

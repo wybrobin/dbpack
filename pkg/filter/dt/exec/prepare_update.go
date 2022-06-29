@@ -82,7 +82,7 @@ func (executor *prepareUpdateExecutor) AfterImage(ctx context.Context) (*schema.
 		return nil, err
 	}
 
-	afterImageSql := executor.buildAfterImageSql(tableMeta, executor.beforeImage)
+	afterImageSql := executor.buildAfterImageSql(tableMeta)
 	var args = make([]interface{}, 0)
 	for _, field := range executor.beforeImage.PKFields() {
 		args = append(args, field.Value)
@@ -111,24 +111,22 @@ func (executor *prepareUpdateExecutor) GetTableName() string {
 func (executor *prepareUpdateExecutor) buildBeforeImageSql(tableMeta schema.TableMeta) string {
 	var b strings.Builder
 	b.WriteString("SELECT ")
-	var i = 0
 	columnCount := len(tableMeta.Columns)
-	for _, column := range tableMeta.Columns {
+	for i, column := range tableMeta.Columns {
 		b.WriteString(misc.CheckAndReplace(column))
-		i = i + 1
-		if i != columnCount {
+		if i < columnCount-1 {
 			b.WriteByte(',')
 		} else {
 			b.WriteByte(' ')
 		}
 	}
-	b.WriteString(fmt.Sprintf(" FROM %s WHERE ", executor.GetTableName()))
+	b.WriteString(fmt.Sprintf("FROM %s WHERE ", executor.GetTableName()))
 	b.WriteString(executor.GetWhereCondition())
 	b.WriteString(" FOR UPDATE")
 	return b.String()
 }
 
-func (executor *prepareUpdateExecutor) buildAfterImageSql(tableMeta schema.TableMeta, beforeImage *schema.TableRecords) string {
+func (executor *prepareUpdateExecutor) buildAfterImageSql(tableMeta schema.TableMeta) string {
 	var b strings.Builder
 	b.WriteString("SELECT ")
 	var i = 0
@@ -142,9 +140,9 @@ func (executor *prepareUpdateExecutor) buildAfterImageSql(tableMeta schema.Table
 			b.WriteByte(' ')
 		}
 	}
-	b.WriteString(fmt.Sprintf(" FROM %s ", executor.GetTableName()))
-	b.WriteString(fmt.Sprintf("WHERE `%s` IN", tableMeta.GetPKName()))
-	b.WriteString(misc.MysqlAppendInParam(len(beforeImage.PKFields())))
+	b.WriteString(fmt.Sprintf("FROM %s ", executor.GetTableName()))
+	b.WriteString(fmt.Sprintf("WHERE `%s` IN ", tableMeta.GetPKName()))
+	b.WriteString(misc.MysqlAppendInParam(len(executor.beforeImage.PKFields())))
 	return b.String()
 }
 

@@ -26,11 +26,24 @@ import (
 
 const (
 	driverName                            = "mysql"
-	dataSourceName                        = "dksl:123456@tcp(127.0.0.1:13306)/employees?timeout=10s&readTimeout=10s&writeTimeout=10s&parseTime=true&loc=Local&charset=utf8mb4,utf8"
-	selectDrugResource                    = "select id, drug_res_type_id, base_type from drug_resource where id between ? and ?"
-	selectDrugResourceOrderByIDDesc       = "select id, drug_res_type_id, base_type from drug_resource where id between ? and ? order by id desc"
-	selectDrugResourceOrderByIDDescLimit  = "select id, drug_res_type_id, base_type from drug_resource where id between ? and ? order by id desc limit ?, ?"
-	selectDrugResourceOrderByIDDescLimit2 = "select id, drug_res_type_id, base_type from drug_resource where id between ? and ? order by id desc limit ?"
+	dataSourceName                        = "dksl:123456@tcp(127.0.0.1:13306)/drug?timeout=10s&readTimeout=10s&writeTimeout=10s&parseTime=true&loc=Local&charset=utf8mb4,utf8"
+	selectDrugResource                    = "select id, drug_res_type_id, base_type, sale_price from drug_resource where id between ? and ?"
+	selectDrugResourceOrderBy1            = "select id, drug_res_type_id, base_type, sale_price from drug_resource where id between ? and ? order by id desc"
+	selectDrugResourceOrderBy2            = "select id, drug_res_type_id, manufacturer_id, sale_price from drug_resource where id between ? and ? order by manufacturer_id desc, id asc"
+	selectDrugResourceOrderByIDDescLimit  = "select id, drug_res_type_id, base_type, sale_price from drug_resource where id between ? and ? order by id desc limit ?, ?"
+	selectDrugResourceOrderByIDDescLimit2 = "select id, drug_res_type_id, base_type, sale_price from drug_resource where id between ? and ? order by id desc limit ?"
+
+	deleteDrugResource = "delete from drug_resource where id = ?"
+	insertDrugResource = "INSERT INTO `drug_resource`(`id`, `drug_res_type_id`, `base_type`, `status`, `type_id`, " +
+		"`dict_dosage_id`, `code`, `pym`, `name`, `manufacturer_id`, `approval_no`, `med_type`, `admin_code`, " +
+		"`pack_unit_id`, `min_unit_id`, `pack_quantity`, `dosage_unit_id`, `dosage_quantity`, `pack_spec`, `take_method_id`, " +
+		"`take_quantity`, `take_unit_id`, `take_unit_name`, `take_frequency`, `common_unit_type`, `purchase_price`, " +
+		"`sale_price`, `cost_category_id`, `invoice_item_id`, `expensive_flag`, `psy_flag_i`, `psy_flag_ii`, `otc_flag`, " +
+		"`nar_flag`, `inventory_upper`, `inventory_lower`, `create_time`, `modify_time`, `del_flag`, `consumable_type`, `tips`)" +
+		" VALUES (20, 'hclb_kqkcl', 2, 1, 'hclb_kqkcl', '', 'ZKW00000898', 'xczj', '吸潮纸尖', 'sccj_tjjfylqxyxgs', " +
+		"'天津械备20160055号', 3, '', 'jjdw_h', '', 1, '', 0.00, '15#', '', 0.0000, '', 'ml', '', 1, 0.0000, 0.0000, " +
+		"'fylb_clf', 'fpxm_clf', 1, 0, 0, 0, 0, 0, 0, NULL, '2018-06-05 09:53:10', 0, 0, NULL);"
+	updateDrugResource = "update drug_resource set sale_price = sale_price + 5 where id between ? and ?"
 )
 
 type _ShardingSuite struct {
@@ -52,27 +65,50 @@ func (suite *_ShardingSuite) SetupSuite() {
 func (suite *_ShardingSuite) TestSelect() {
 	rows, err := suite.db.Query(selectDrugResource, 200, 210)
 	if suite.NoErrorf(err, "select row error: %v", err) {
-		var id int64
-		var drugResTypeId string
-		var baseType int
+		var (
+			id            int64
+			drugResTypeId string
+			baseType      int
+			salePrice     float32
+		)
 		for rows.Next() {
-			err := rows.Scan(&id, &drugResTypeId, &baseType)
+			err := rows.Scan(&id, &drugResTypeId, &baseType, &salePrice)
 			suite.NoError(err)
-			suite.T().Logf("id: %d, drug resource type id: %s, base type: %d", id, drugResTypeId, baseType)
+			suite.T().Logf("id: %d, drug resource type id: %s, base type: %d, sale price: %v", id, drugResTypeId, baseType, salePrice)
 		}
 	}
 }
 
 func (suite *_ShardingSuite) TestSelectOrderBy() {
-	rows, err := suite.db.Query(selectDrugResourceOrderByIDDesc, 200, 210)
+	rows, err := suite.db.Query(selectDrugResourceOrderBy1, 200, 210)
 	if suite.NoErrorf(err, "select row error: %v", err) {
-		var id int64
-		var drugResTypeId string
-		var baseType int
+		var (
+			id            int64
+			drugResTypeId string
+			baseType      int
+			salePrice     float32
+		)
 		for rows.Next() {
-			err := rows.Scan(&id, &drugResTypeId, &baseType)
+			err := rows.Scan(&id, &drugResTypeId, &baseType, &salePrice)
 			suite.NoError(err)
-			suite.T().Logf("id: %d, drug resource type id: %s, base type: %d", id, drugResTypeId, baseType)
+			suite.T().Logf("id: %d, drug resource type id: %s, base type: %d, sale price: %v", id, drugResTypeId, baseType, salePrice)
+		}
+	}
+}
+
+func (suite *_ShardingSuite) TestSelectOrderBy2() {
+	rows, err := suite.db.Query(selectDrugResourceOrderBy2, 200, 250)
+	if suite.NoErrorf(err, "select row error: %v", err) {
+		var (
+			id             int64
+			drugResTypeId  string
+			manufacturerId string
+			salePrice      float32
+		)
+		for rows.Next() {
+			err := rows.Scan(&id, &drugResTypeId, &manufacturerId, &salePrice)
+			suite.NoError(err)
+			suite.T().Logf("id: %d, drug resource type id: %s, manufacturer id: %s, sale price: %v", id, drugResTypeId, manufacturerId, salePrice)
 		}
 	}
 }
@@ -80,13 +116,16 @@ func (suite *_ShardingSuite) TestSelectOrderBy() {
 func (suite *_ShardingSuite) TestSelectOrderByAndLimit() {
 	rows, err := suite.db.Query(selectDrugResourceOrderByIDDescLimit, 200, 300, 10, 20)
 	if suite.NoErrorf(err, "select row error: %v", err) {
-		var id int64
-		var drugResTypeId string
-		var baseType int
+		var (
+			id            int64
+			drugResTypeId string
+			baseType      int
+			salePrice     float32
+		)
 		for rows.Next() {
-			err := rows.Scan(&id, &drugResTypeId, &baseType)
+			err := rows.Scan(&id, &drugResTypeId, &baseType, &salePrice)
 			suite.NoError(err)
-			suite.T().Logf("id: %d, drug resource type id: %s, base type: %d", id, drugResTypeId, baseType)
+			suite.T().Logf("id: %d, drug resource type id: %s, base type: %d, sale price: %v", id, drugResTypeId, baseType, salePrice)
 		}
 	}
 }
@@ -94,13 +133,55 @@ func (suite *_ShardingSuite) TestSelectOrderByAndLimit() {
 func (suite *_ShardingSuite) TestSelectOrderByAndLimit2() {
 	rows, err := suite.db.Query(selectDrugResourceOrderByIDDescLimit2, 200, 300, 10)
 	if suite.NoErrorf(err, "select row error: %v", err) {
-		var id int64
-		var drugResTypeId string
-		var baseType int
+		var (
+			id            int64
+			drugResTypeId string
+			baseType      int
+			salePrice     float32
+		)
 		for rows.Next() {
-			err := rows.Scan(&id, &drugResTypeId, &baseType)
+			err := rows.Scan(&id, &drugResTypeId, &baseType, &salePrice)
 			suite.NoError(err)
-			suite.T().Logf("id: %d, drug resource type id: %s, base type: %d", id, drugResTypeId, baseType)
+			suite.T().Logf("id: %d, drug resource type id: %s, base type: %d, sale price: %v", id, drugResTypeId, baseType, salePrice)
+		}
+	}
+}
+
+func (suite *_ShardingSuite) TestDeleteDrugResource() {
+	result, err := suite.db.Exec(deleteDrugResource, 20)
+	suite.Assert().Nil(err)
+	affectedRows, err := result.RowsAffected()
+	suite.Assert().Nil(err)
+	suite.Assert().Equal(int64(1), affectedRows)
+}
+
+func (suite *_ShardingSuite) TestInsertDrugResource() {
+	result, err := suite.db.Exec(insertDrugResource)
+	suite.Assert().Nil(err)
+	affectedRows, err := result.RowsAffected()
+	suite.Assert().Nil(err)
+	suite.Assert().Equal(int64(1), affectedRows)
+}
+
+func (suite *_ShardingSuite) TestUpdateDrugResource() {
+	result, err := suite.db.Exec(updateDrugResource, 200, 210)
+	suite.Assert().Nil(err)
+	affectedRows, err := result.RowsAffected()
+	suite.Assert().Nil(err)
+	suite.Assert().Equal(int64(11), affectedRows)
+
+	rows, err := suite.db.Query(selectDrugResourceOrderBy1, 200, 210)
+	if suite.NoErrorf(err, "select row error: %v", err) {
+		var (
+			id            int64
+			drugResTypeId string
+			baseType      int
+			salePrice     float32
+		)
+		for rows.Next() {
+			err := rows.Scan(&id, &drugResTypeId, &baseType, &salePrice)
+			suite.NoError(err)
+			suite.T().Logf("id: %d, drug resource type id: %s, base type: %d, sale price: %v", id, drugResTypeId, baseType, salePrice)
 		}
 	}
 }

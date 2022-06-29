@@ -128,18 +128,16 @@ func (executor *prepareGlobalLockExecutor) BeforeImage(ctx context.Context) (*sc
 func (executor *prepareGlobalLockExecutor) buildBeforeImageSql(tableMeta schema.TableMeta) string {
 	var b strings.Builder
 	b.WriteString("SELECT ")
-	var i = 0
 	columnCount := len(tableMeta.Columns)
-	for _, column := range tableMeta.Columns {
+	for i, column := range tableMeta.Columns {
 		b.WriteString(misc.CheckAndReplace(column))
-		i = i + 1
-		if i < columnCount {
+		if i < columnCount-1 {
 			b.WriteByte(',')
 		} else {
 			b.WriteByte(' ')
 		}
 	}
-	b.WriteString(fmt.Sprintf(" FROM %s WHERE ", executor.GetTableName()))
+	b.WriteString(fmt.Sprintf("FROM %s WHERE ", executor.GetTableName()))
 	b.WriteString(executor.GetWhereCondition())
 	return b.String()
 }

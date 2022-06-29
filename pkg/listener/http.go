@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 
 	"github.com/pkg/errors"
 	"github.com/valyala/fasthttp"
@@ -107,6 +108,9 @@ func (l *HttpListener) Listen() {
 		//调用 HttpDistributedTransaction 的 PostHandle 方法，也就是调用完被代理的http服务后，要做的一些事情
 		if err := l.doPostFilter(ctx); err != nil {
 			log.Error(err)
+			ctx.Response.Reset()
+			ctx.SetStatusCode(http.StatusInternalServerError)
+			ctx.SetBodyString(fmt.Sprintf(`{"success":false,"error":"%s"}`, err.Error()))
 		}
 	}); err != nil {
 		log.Error(err)

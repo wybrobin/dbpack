@@ -19,7 +19,6 @@ package main
 import (
 	"context"
 	"fmt"
-
 	"net"
 	"net/http"
 	"os"
@@ -38,6 +37,7 @@ import (
 	"github.com/cectc/dbpack/pkg/dt/storage/etcd"
 	"github.com/cectc/dbpack/pkg/executor"
 	"github.com/cectc/dbpack/pkg/filter"
+	_ "github.com/cectc/dbpack/pkg/filter/audit_log"
 	_ "github.com/cectc/dbpack/pkg/filter/dt"
 	_ "github.com/cectc/dbpack/pkg/filter/metrics"
 	dbpackHttp "github.com/cectc/dbpack/pkg/http"
@@ -46,6 +46,7 @@ import (
 	"github.com/cectc/dbpack/pkg/proto"
 	"github.com/cectc/dbpack/pkg/resource"
 	"github.com/cectc/dbpack/pkg/server"
+	"github.com/cectc/dbpack/pkg/tracing"
 	"github.com/cectc/dbpack/third_party/pools"
 	_ "github.com/cectc/dbpack/third_party/types/parser_driver"
 )
@@ -57,12 +58,13 @@ func main() {
 var (
 	Version               = "0.1.0"
 	defaultHTTPListenPort = 18888
+	appName               = "dbpack"
 
 	configPath string
 
 	rootCommand = &cobra.Command{
-		Use:     "dbpack",
-		Short:   "dbpack is a db proxy server",
+		Use:     appName,
+		Short:   fmt.Sprintf("%s is a db proxy server", appName),
 		Version: Version,
 	}
 
@@ -125,10 +127,12 @@ var (
 
 			//初始化分布式事务，主要是连接etcd。当多进程的时候，在共用一个appid的进程中，使用etcd选取出一个主进程，运行一些全局任务
 			if conf.DistributedTransaction != nil {
+				dbpackHttp.DistributedTransactionEnabled = true
 				driver := etcd.NewEtcdStore(conf.DistributedTransaction.EtcdConfig)
 				dt.InitDistributedTransactionManager(conf.DistributedTransaction, driver)
 			}
 
+			dbpackHttp.Listeners = conf.Listeners
 			dbpack := server.NewServer()
 			//都是使用net.Listen监听，mysql的listener多个executor，因为mysql要透传到数据库，http的listener多个filters，因为http只让合法的路径通过
 			for _, listenerConf := range conf.Listeners {
@@ -157,6 +161,13 @@ var (
 			}
 
 			//当进程收到 SIGINT 或 SIGTERM 信号时，根据 termination_drain_duration 配置（sample里没有），晚一点退出。如果连续2次收到，就直接退出
+			tracingMgr, err := tracing.NewTracer(Version, "console")
+			if err != nil {
+				log.Fatalf("could not setup tracing manager: %s", err.Error())
+			}
+			if err != nil {
+				log.Fatalf("could not setup tracing exporter: %s", err.Error())
+			}
 			ctx, cancel := context.WithCancel(context.Background())
 			c := make(chan os.Signal, 2)
 			signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -169,6 +180,7 @@ var (
 					cancel()
 				}()
 				<-c
+				_ = tracingMgr.Shutdown(ctx)
 				os.Exit(1) // second signal. Exit directly.
 			}()
 

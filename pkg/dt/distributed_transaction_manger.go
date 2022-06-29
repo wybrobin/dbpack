@@ -25,13 +25,14 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/pingcap/errors"
+	"github.com/pkg/errors"
 	"k8s.io/client-go/util/workqueue"
 
 	"github.com/cectc/dbpack/pkg/config"
 	"github.com/cectc/dbpack/pkg/dt/api"
 	"github.com/cectc/dbpack/pkg/dt/metrics"
 	"github.com/cectc/dbpack/pkg/dt/storage"
+	dbpackHttp "github.com/cectc/dbpack/pkg/http"
 	"github.com/cectc/dbpack/pkg/log"
 	"github.com/cectc/dbpack/pkg/misc"
 	"github.com/cectc/dbpack/pkg/misc/uuid"
@@ -71,7 +72,7 @@ func InitDistributedTransactionManager(conf *config.DistributedTransaction, stor
 	}
 	go func() {
 		if storageDriver.LeaderElection(manager.applicationID) {	//这个是当多个dbpack启动的时候，选举出一个进程来实现全局管理
-																	//选举出来的leader会返回true，其他的则卡在这里，要等
+			dbpackHttp.IsMaster = true								//选举出来的leader会返回true，其他的则卡在这里，要等
 			if err := manager.processGlobalSessions(); err != nil {
 				log.Fatal(err)
 			}
@@ -323,12 +324,11 @@ func (manager *DistributedTransactionManager) processNextGlobalSession(ctx conte
 		return true
 	}
 	if newGlobalSession.Status == api.Begin {
-		if isGlobalSessionTimeout(newGlobalSession) {
-			_, err = manager.Rollback(context.Background(), newGlobalSession.XID)
-			if err != nil {
-				log.Error(err)
-			}
+		_, err = manager.Rollback(context.Background(), newGlobalSession.XID)
+		if err != nil {
+			log.Error(err)
 		}
+		manager.globalSessionQueue.AddAfter(gs, time.Duration(gs.Timeout)*time.Millisecond)
 	}
 	if newGlobalSession.Status == api.Committing || newGlobalSession.Status == api.Rollbacking {
 		bsKeys, err := manager.storageDriver.GetBranchSessionKeys(context.Background(), newGlobalSession.XID)
@@ -469,7 +469,7 @@ func (manager *DistributedTransactionManager) recordGlobalTransactionMetric(tran
 }
 
 func isGlobalSessionTimeout(gs *api.GlobalSession) bool {
-	return (misc.CurrentTimeMillis() - uint64(gs.BeginTime)) > uint64(gs.Timeout)
+	return misc.CurrentTimeMillis()-uint64(gs.BeginTime) > uint64(gs.Timeout)
 }
 
 func (manager *DistributedTransactionManager) IsRollingBackDead(bs *api.BranchSession) bool {

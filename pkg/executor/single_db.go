@@ -28,6 +28,7 @@ import (
 	"github.com/cectc/dbpack/pkg/log"
 	"github.com/cectc/dbpack/pkg/proto"
 	"github.com/cectc/dbpack/pkg/resource"
+	"github.com/cectc/dbpack/pkg/tracing"
 	"github.com/cectc/dbpack/third_party/parser/ast"
 )
 
@@ -129,9 +130,10 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 		result proto.Result
 		err    error
 	)
-
-	connectionID := proto.ConnectionID(ctx)
-	queryStmt := proto.QueryStmt(ctx)
+	newCtx, span := tracing.GetTraceSpan(ctx, "sdb_execute_com_query")
+	defer span.End()
+	connectionID := proto.ConnectionID(newCtx)
+	queryStmt := proto.QueryStmt(newCtx)
 	if queryStmt == nil {
 		return nil, 0, errors.New("query stmt should not be nil")
 	}
@@ -141,7 +143,7 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 	case *ast.SetStmt:
 		if shouldStartTransaction(stmt) {
 			// TODO add metrics
-			tx, result, err = db.Begin(ctx)
+			tx, result, err = db.Begin(newCtx)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -151,13 +153,13 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 			txi, ok := executor.localTransactionMap.Load(connectionID)
 			if ok {
 				tx = txi.(proto.Tx)
-				return tx.Query(ctx, sql)
+				return tx.Query(newCtx, sql)
 			}
-			return db.Query(ctx, sql)
+			return db.Query(newCtx, sql)
 		}
 	case *ast.BeginStmt:
 		// TODO add metrics
-		tx, result, err = db.Begin(ctx)
+		tx, result, err = db.Begin(newCtx)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -171,7 +173,7 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 		defer executor.localTransactionMap.Delete(connectionID)
 		tx = txi.(proto.Tx)
 		// TODO add metrics
-		if result, err = tx.Commit(ctx); err != nil {
+		if result, err = tx.Commit(newCtx); err != nil {
 			return nil, 0, err
 		}
 		return result, 0, err
@@ -183,7 +185,7 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 		defer executor.localTransactionMap.Delete(connectionID)
 		tx = txi.(proto.Tx)
 		// TODO add metrics
-		if result, err = tx.Rollback(ctx); err != nil {
+		if result, err = tx.Rollback(newCtx); err != nil {
 			return nil, 0, err
 		}
 		return result, 0, err
@@ -191,16 +193,16 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 		txi, ok := executor.localTransactionMap.Load(connectionID)
 		if ok {
 			tx = txi.(proto.Tx)
-			return tx.Query(ctx, sql)
+			return tx.Query(newCtx, sql)
 		}
-		return db.Query(ctx, sql)
+		return db.Query(newCtx, sql)
 	}
 }
 
 //insert, update
 func (executor *SingleDBExecutor) ExecutorComStmtExecute(ctx context.Context, stmt *proto.Stmt) (proto.Result, uint16, error) {
 	connectionID := proto.ConnectionID(ctx)
-	log.Debugf("connectionID: %d, prepare: %s", connectionID, stmt.PrepareStmt)
+	log.Debugf("connectionID: %d, prepare: %s", connectionID, stmt.SqlText)
 	txi, ok := executor.localTransactionMap.Load(connectionID)	//查看当前连接是否在事务里
 	if ok {//如果在事务里，则以事务的方式执行操作
 		tx := txi.(proto.Tx)

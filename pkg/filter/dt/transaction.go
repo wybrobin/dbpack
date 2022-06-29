@@ -33,9 +33,12 @@ import (
 func (f *_httpFilter) handleHttp1GlobalBegin(ctx *fasthttp.RequestCtx, transactionInfo *TransactionInfo) (bool, error) {
 	// todo support transaction isolation level
 	transactionManager := dt.GetDistributedTransactionManager()
-	xid, err := transactionManager.Begin(ctx, transactionInfo.RequestPath, transactionInfo.Timeout)
+	xid, err := transactionManager.Begin(ctx, string(ctx.Request.RequestURI()), transactionInfo.Timeout)
 	if err != nil {
-		ctx.Error(fmt.Sprintf(`{"error":"failed to begin global transaction, %v"}`, err), http.StatusInternalServerError)
+		ctx.Response.Reset()
+		ctx.SetStatusCode(http.StatusInternalServerError)
+		ctx.SetBodyString(fmt.Sprintf(`{"success":false,"error":"failed to begin global transaction, %v"}`, err))
+
 		return false, errors.Errorf("failed to begin global transaction, transaction info: %v, err: %v",
 			transactionInfo, err)
 	}
@@ -64,10 +67,13 @@ func (f *_httpFilter) handleHttp1GlobalEnd(ctx *fasthttp.RequestCtx) error {
 }
 
 // handleHttp1BranchRegister return bool, represent whether continue
-func (f *_httpFilter) handleHttp1BranchRegister(ctx *fasthttp.RequestCtx, tccResource *TCCResource) (bool, error) {
+func (f *_httpFilter) handleHttp1BranchRegister(ctx *fasthttp.RequestCtx, tccResource *TccResourceInfo) (bool, error) {
 	xid := ctx.Request.Header.Peek(XID)
 	if string(xid) == "" {
-		ctx.Error(`{"error":"failed to get XID from request header"}`, http.StatusInternalServerError)
+		ctx.Response.Reset()
+		ctx.SetStatusCode(http.StatusInternalServerError)
+		ctx.SetBodyString(`{"success":false,"error":"failed to get XID from request header"}`)
+
 		return false, errors.New("failed to get XID from request header")
 	}
 
@@ -89,20 +95,26 @@ func (f *_httpFilter) handleHttp1BranchRegister(ctx *fasthttp.RequestCtx, tccRes
 
 	data, err := requestContext.Encode()
 	if err != nil {
-		ctx.Error(fmt.Sprintf(`{"error":"encode request context failed, %v"}`, err), http.StatusInternalServerError)
+		ctx.Response.Reset()
+		ctx.SetStatusCode(http.StatusInternalServerError)
+		ctx.SetBodyString(fmt.Sprintf(`{"success":false,"error":"encode request context failed, %v"}`, err))
+
 		return false, errors.Errorf("encode request context failed, request context: %v, err: %v", requestContext, err)
 	}
 
 	transactionManager := dt.GetDistributedTransactionManager()
 	branchID, _, err := transactionManager.BranchRegister(ctx, &api.BranchRegisterRequest{
 		XID:             string(xid),
-		ResourceID:      tccResource.PrepareRequestPath,
+		ResourceID:      string(ctx.Request.RequestURI()),
 		LockKey:         "",
 		BranchType:      api.TCC,
 		ApplicationData: data,
 	})
 	if err != nil {
-		ctx.Error(fmt.Sprintf(`{"error":"branch transaction register failed, %v"}`, err), http.StatusInternalServerError)
+		ctx.Response.Reset()
+		ctx.SetStatusCode(http.StatusInternalServerError)
+		ctx.SetBodyString(fmt.Sprintf(`{"success":false,"error":"branch transaction register failed, %v"}`, err))
+
 		return false, errors.Errorf("branch transaction register failed, XID: %s, err: %v", xid, err)
 	}
 	ctx.SetUserValue(XID, string(xid))

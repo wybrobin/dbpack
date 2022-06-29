@@ -19,6 +19,7 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 
 	"github.com/pkg/errors"
@@ -29,7 +30,14 @@ import (
 	"github.com/cectc/dbpack/pkg/log"
 	"github.com/cectc/dbpack/pkg/mysql"
 	"github.com/cectc/dbpack/pkg/proto"
+	"github.com/cectc/dbpack/pkg/resource"
+	"github.com/cectc/dbpack/pkg/tracing"
 	"github.com/cectc/dbpack/third_party/parser/ast"
+	"github.com/cectc/dbpack/third_party/parser/model"
+)
+
+const (
+	hintUseDB = "UseDB"
 )
 
 type ReadWriteSplittingExecutor struct {
@@ -145,6 +153,8 @@ func (executor *ReadWriteSplittingExecutor) ExecuteFieldList(ctx context.Context
 }
 
 func (executor *ReadWriteSplittingExecutor) ExecutorComQuery(ctx context.Context, sql string) (proto.Result, uint16, error) {
+	newCtx, span := tracing.GetTraceSpan(ctx, "rw_execute_com_query")
+	defer span.End()
 	var (
 		db     *DataSourceBrief
 		tx     proto.Tx
@@ -152,15 +162,15 @@ func (executor *ReadWriteSplittingExecutor) ExecutorComQuery(ctx context.Context
 		err    error
 	)
 
-	connectionID := proto.ConnectionID(ctx)
-	queryStmt := proto.QueryStmt(ctx)
+	connectionID := proto.ConnectionID(newCtx)
+	queryStmt := proto.QueryStmt(newCtx)
 
 	switch stmt := queryStmt.(type) {
 	case *ast.SetStmt:
 		if shouldStartTransaction(stmt) {
-			db = executor.masters.Next(proto.WithMaster(ctx)).(*DataSourceBrief)
+			db = executor.masters.Next(proto.WithMaster(newCtx)).(*DataSourceBrief)
 			// TODO add metrics
-			tx, result, err = db.DB.Begin(ctx)
+			tx, result, err = db.DB.Begin(newCtx)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -170,12 +180,12 @@ func (executor *ReadWriteSplittingExecutor) ExecutorComQuery(ctx context.Context
 			txi, ok := executor.localTransactionMap.Load(connectionID)
 			if ok {
 				tx = txi.(proto.Tx)
-				return tx.Query(ctx, sql)
+				return tx.Query(newCtx, sql)
 			}
 			// set to all db
 			for _, db := range executor.all {
 				go func(db *DataSourceBrief) {
-					if _, _, err := db.DB.Query(ctx, sql); err != nil {
+					if _, _, err := db.DB.Query(newCtx, sql); err != nil {
 						log.Error(err)
 					}
 				}(db)
@@ -186,9 +196,9 @@ func (executor *ReadWriteSplittingExecutor) ExecutorComQuery(ctx context.Context
 			}, 0, nil
 		}
 	case *ast.BeginStmt:
-		db = executor.masters.Next(proto.WithMaster(ctx)).(*DataSourceBrief)
+		db = executor.masters.Next(proto.WithMaster(newCtx)).(*DataSourceBrief)
 		// TODO add metrics
-		tx, result, err = db.DB.Begin(ctx)
+		tx, result, err = db.DB.Begin(newCtx)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -202,7 +212,7 @@ func (executor *ReadWriteSplittingExecutor) ExecutorComQuery(ctx context.Context
 		defer executor.localTransactionMap.Delete(connectionID)
 		tx = txi.(proto.Tx)
 		// TODO add metrics
-		if result, err = tx.Commit(ctx); err != nil {
+		if result, err = tx.Commit(newCtx); err != nil {
 			return nil, 0, err
 		}
 		return result, 0, err
@@ -214,26 +224,50 @@ func (executor *ReadWriteSplittingExecutor) ExecutorComQuery(ctx context.Context
 		defer executor.localTransactionMap.Delete(connectionID)
 		tx = txi.(proto.Tx)
 		// TODO add metrics
-		if result, err = tx.Rollback(ctx); err != nil {
+		if result, err = tx.Rollback(newCtx); err != nil {
 			return nil, 0, err
 		}
 		return result, 0, err
 	case *ast.InsertStmt, *ast.DeleteStmt, *ast.UpdateStmt:
 		txi, ok := executor.localTransactionMap.Load(connectionID)
 		if ok {
+			// in local transaction
 			tx = txi.(proto.Tx)
-			return tx.Query(ctx, sql)
+			return tx.Query(newCtx, sql)
 		}
-		db = executor.masters.Next(proto.WithMaster(ctx)).(*DataSourceBrief)
-		return db.DB.Query(proto.WithMaster(ctx), sql)
+		withMasterCtx := proto.WithMaster(newCtx)
+		db = executor.masters.Next(withMasterCtx).(*DataSourceBrief)
+		return db.DB.Query(withMasterCtx, sql)
+	case *ast.SelectStmt:
+		txi, ok := executor.localTransactionMap.Load(connectionID)
+		if ok {
+			// in local transaction
+			tx = txi.(proto.Tx)
+			return tx.Query(newCtx, sql)
+		}
+		withSlaveCtx := proto.WithSlave(newCtx)
+		if has, dsName := hasUseDBHint(stmt.TableHints); has {
+			protoDB := resource.GetDBManager().GetDB(dsName)
+			if protoDB == nil {
+				log.Debugf("data source %d not found", dsName)
+				db = executor.reads.Next(withSlaveCtx).(*DataSourceBrief)
+				return db.DB.Query(withSlaveCtx, sql)
+			} else {
+				return protoDB.Query(withSlaveCtx, sql)
+			}
+		}
+		db = executor.reads.Next(withSlaveCtx).(*DataSourceBrief)
+		return db.DB.Query(withSlaveCtx, sql)
 	default:
 		txi, ok := executor.localTransactionMap.Load(connectionID)
 		if ok {
+			// in local transaction
 			tx = txi.(proto.Tx)
-			return tx.Query(ctx, sql)
+			return tx.Query(newCtx, sql)
 		}
-		db = executor.reads.Next(proto.WithSlave(ctx)).(*DataSourceBrief)
-		return db.DB.Query(proto.WithSlave(ctx), sql)
+		withSlaveCtx := proto.WithSlave(newCtx)
+		db = executor.reads.Next(withSlaveCtx).(*DataSourceBrief)
+		return db.DB.Query(withSlaveCtx, sql)
 	}
 }
 
@@ -241,15 +275,27 @@ func (executor *ReadWriteSplittingExecutor) ExecutorComStmtExecute(ctx context.C
 	connectionID := proto.ConnectionID(ctx)
 	txi, ok := executor.localTransactionMap.Load(connectionID)
 	if ok {
+		// in local transaction
 		tx := txi.(proto.Tx)
 		return tx.ExecuteStmt(ctx, stmt)
 	}
-	switch stmt.StmtNode.(type) {
+	switch st := stmt.StmtNode.(type) {
 	case *ast.InsertStmt, *ast.DeleteStmt, *ast.UpdateStmt:
 		db := executor.masters.Next(proto.WithMaster(ctx)).(*DataSourceBrief)
 		return db.DB.ExecuteStmt(proto.WithMaster(ctx), stmt)
 	case *ast.SelectStmt:
-		db := executor.reads.Next(proto.WithSlave(ctx)).(*DataSourceBrief)
+		var db *DataSourceBrief
+		if has, dsName := hasUseDBHint(st.TableHints); has {
+			protoDB := resource.GetDBManager().GetDB(dsName)
+			if protoDB == nil {
+				log.Debugf("data source %d not found", dsName)
+				db = executor.reads.Next(proto.WithSlave(ctx)).(*DataSourceBrief)
+				return db.DB.ExecuteStmt(proto.WithSlave(ctx), stmt)
+			} else {
+				return protoDB.ExecuteStmt(proto.WithSlave(ctx), stmt)
+			}
+		}
+		db = executor.reads.Next(proto.WithSlave(ctx)).(*DataSourceBrief)
 		return db.DB.ExecuteStmt(proto.WithSlave(ctx), stmt)
 	default:
 		return nil, 0, errors.Errorf("unsupported %t statement", stmt.StmtNode)
@@ -288,4 +334,15 @@ func (executor *ReadWriteSplittingExecutor) doPostFilter(ctx context.Context, re
 		}
 	}
 	return nil
+}
+
+func hasUseDBHint(hints []*ast.TableOptimizerHint) (bool, string) {
+	for _, hint := range hints {
+		if strings.EqualFold(hint.HintName.String(), hintUseDB) {
+			hintData := hint.HintData.(model.CIStr)
+			ds := hintData.String()
+			return true, ds
+		}
+	}
+	return false, ""
 }

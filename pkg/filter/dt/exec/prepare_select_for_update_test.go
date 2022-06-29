@@ -34,7 +34,7 @@ import (
 	"github.com/cectc/dbpack/third_party/parser/ast"
 )
 
-func TestSelectForUpdate(t *testing.T) {
+func TestPrepareSelectForUpdate(t *testing.T) {
 	testCases := []*struct {
 		sql                    string
 		lockInterval           time.Duration
@@ -56,10 +56,10 @@ func TestSelectForUpdate(t *testing.T) {
 	patches1 := isLockablePatch()
 	defer patches1.Reset()
 
-	patches2 := getTableMetaPatch()
+	patches2 := getPrepareTableMetaPatch()
 	defer patches2.Reset()
 
-	patches3 := buildRecordsPatch()
+	patches3 := buildBinaryRecordsPatch()
 	defer patches3.Reset()
 
 	for _, c := range testCases {
@@ -76,7 +76,7 @@ func TestSelectForUpdate(t *testing.T) {
 			ctx := proto.WithCommandType(context.Background(), constant.ComStmtExecute)
 			protoStmt := &proto.Stmt{
 				StatementID: 1,
-				PrepareStmt: c.sql,
+				SqlText:     c.sql,
 				ParamsCount: 1,
 				ParamData:   nil,
 				ParamsType:  nil,
@@ -100,14 +100,14 @@ func TestSelectForUpdate(t *testing.T) {
 	}
 }
 
-func getTableMetaPatch() *gomonkey.Patches {
+func getPrepareTableMetaPatch() *gomonkey.Patches {
 	var executor *prepareSelectForUpdateExecutor
 	return gomonkey.ApplyMethodFunc(executor, "GetTableMeta", func(ctx context.Context) (schema.TableMeta, error) {
 		return tableMeta, nil
 	})
 }
 
-func buildRecordsPatch() *gomonkey.Patches {
+func buildBinaryRecordsPatch() *gomonkey.Patches {
 	return gomonkey.ApplyFunc(schema.BuildBinaryRecords, func(meta schema.TableMeta, result *mysql.Result) *schema.TableRecords {
 		return &schema.TableRecords{
 			TableMeta: tableMeta,
@@ -119,13 +119,19 @@ func buildRecordsPatch() *gomonkey.Patches {
 							Name:    "id",
 							KeyType: schema.PrimaryKey,
 							Type:    0,
-							Value:   "10",
+							Value:   int64(10),
+						},
+						{
+							Name:    "name",
+							KeyType: schema.Null,
+							Type:    0,
+							Value:   []byte("scott"),
 						},
 						{
 							Name:    "age",
 							KeyType: schema.Null,
 							Type:    0,
-							Value:   "20",
+							Value:   int64(20),
 						},
 					},
 				},

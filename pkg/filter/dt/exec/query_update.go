@@ -71,7 +71,7 @@ func (executor *queryUpdateExecutor) AfterImage(ctx context.Context) (*schema.Ta
 		return nil, err
 	}
 
-	afterImageSql := executor.buildAfterImageSql(tableMeta, executor.beforeImage)
+	afterImageSql := executor.buildAfterImageSql(tableMeta)
 	result, _, err := executor.conn.ExecuteWithWarningCount(afterImageSql, true)
 	if err != nil {
 		return nil, err
@@ -96,45 +96,47 @@ func (executor *queryUpdateExecutor) GetTableName() string {
 func (executor *queryUpdateExecutor) buildBeforeImageSql(tableMeta schema.TableMeta) string {
 	var b strings.Builder
 	b.WriteString("SELECT ")
-	var i = 0
 	columnCount := len(tableMeta.Columns)
-	for _, column := range tableMeta.Columns {
+	for i, column := range tableMeta.Columns {
 		b.WriteString(misc.CheckAndReplace(column))
-		i = i + 1
-		if i != columnCount {
+		if i < columnCount-1 {
 			b.WriteByte(',')
 		} else {
 			b.WriteByte(' ')
 		}
 	}
-	b.WriteString(fmt.Sprintf(" FROM %s WHERE ", executor.GetTableName()))
+	b.WriteString(fmt.Sprintf("FROM %s WHERE ", executor.GetTableName()))
 	b.WriteString(executor.GetWhereCondition())
 	b.WriteString(" FOR UPDATE")
 	return b.String()
 }
 
-func (executor *queryUpdateExecutor) buildAfterImageSql(tableMeta schema.TableMeta, beforeImage *schema.TableRecords) string {
+func (executor *queryUpdateExecutor) buildAfterImageSql(tableMeta schema.TableMeta) string {
 	var b strings.Builder
 	b.WriteString("SELECT ")
-	var i = 0
 	columnCount := len(tableMeta.Columns)
-	for _, column := range tableMeta.Columns {
+	for i, column := range tableMeta.Columns {
 		b.WriteString(misc.CheckAndReplace(column))
-		i = i + 1
-		if i < columnCount {
+		if i < columnCount-1 {
 			b.WriteByte(',')
 		} else {
 			b.WriteByte(' ')
 		}
 	}
-	b.WriteString(fmt.Sprintf(" FROM %s ", executor.GetTableName()))
-	b.WriteString(fmt.Sprintf(" WHERE `%s` IN (", tableMeta.GetPKName()))
-	pkFields := beforeImage.PKFields()
+	b.WriteString(fmt.Sprintf("FROM %s ", executor.GetTableName()))
+	b.WriteString(fmt.Sprintf("WHERE `%s` IN (", tableMeta.GetPKName()))
+	pkFields := executor.beforeImage.PKFields()
 	for i, field := range pkFields {
+		switch val := field.Value.(type) {
+		case string:
+			b.WriteString(fmt.Sprintf("'%s'", val))
+		case []byte:
+			b.WriteString(fmt.Sprintf("'%s'", val))
+		default:
+			b.WriteString(fmt.Sprintf("%v", val))
+		}
 		if i < len(pkFields)-1 {
-			b.WriteString(fmt.Sprintf("'%s',", field.Value))
-		} else {
-			b.WriteString(fmt.Sprintf("'%s'", field.Value))
+			b.WriteByte(',')
 		}
 	}
 	b.WriteByte(')')

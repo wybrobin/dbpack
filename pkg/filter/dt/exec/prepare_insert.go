@@ -107,19 +107,17 @@ func (executor *prepareInsertExecutor) buildTableRecords(ctx context.Context, pk
 func (executor *prepareInsertExecutor) buildAfterImageSql(tableMeta schema.TableMeta, pkValues []interface{}) string {
 	var b strings.Builder
 	b.WriteString("SELECT ")
-	var i = 0
 	columnCount := len(tableMeta.Columns)	//总共多少列，乱序的
-	for _, column := range tableMeta.Columns {
-		b.WriteString(misc.CheckAndReplace(column))	////检查是不是mysql的关键词，如果是的话，则加上``
-		i = i + 1
-		if i < columnCount {	//不是最后一行写,
+	for i, column := range tableMeta.Columns {
+		b.WriteString(misc.CheckAndReplace(column))	//检查是不是mysql的关键词，如果是的话，则加上``
+		if i < columnCount-1 {
 			b.WriteByte(',')
 		} else {	//是最后一行，写空格
 			b.WriteByte(' ')
 		}
 	}
 	b.WriteString(fmt.Sprintf("FROM %s ", executor.GetTableName()))	//from 表名
-	b.WriteString(fmt.Sprintf(" WHERE `%s` IN ", tableMeta.GetPKName()))	//where 主键名 in
+	b.WriteString(fmt.Sprintf("WHERE `%s` IN ", tableMeta.GetPKName()))	//where 主键名 in
 	b.WriteString(misc.MysqlAppendInParam(len(pkValues)))	////组成(?,?,?,...,?)
 	return b.String()
 }
@@ -142,22 +140,18 @@ func (executor *prepareInsertExecutor) getPKValuesByColumn(ctx context.Context) 
 //返回主键的下标
 func (executor *prepareInsertExecutor) getPKIndex(ctx context.Context) int {
 	insertColumns := executor.GetInsertColumns()	//插入的列数
-	tableMeta, _ := executor.GetTableMeta(ctx)	//
+	tableMeta, _ := executor.GetTableMeta(ctx)
 
-	if insertColumns != nil && len(insertColumns) > 0 {
-		for i, columnName := range insertColumns {
-			if strings.EqualFold(tableMeta.GetPKName(), columnName) {
-				return i
-			}
+	for i, columnName := range insertColumns {
+		if strings.EqualFold(tableMeta.GetPKName(), columnName) {
+			return i
 		}
-	} else {
-		allColumns := tableMeta.Columns
-		var idx = 0
-		for _, column := range allColumns {
-			if strings.EqualFold(tableMeta.GetPKName(), column) {
-				return idx
-			}
-			idx = idx + 1
+	}
+
+	allColumns := tableMeta.Columns
+	for i, column := range allColumns {
+		if strings.EqualFold(tableMeta.GetPKName(), column) {
+			return i
 		}
 	}
 	return -1
