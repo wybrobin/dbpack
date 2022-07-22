@@ -29,6 +29,7 @@ import (
 	"github.com/cectc/dbpack/pkg/misc"
 	"github.com/cectc/dbpack/pkg/proto"
 	"github.com/cectc/dbpack/pkg/resource"
+	"github.com/cectc/dbpack/pkg/tracing"
 	"github.com/cectc/dbpack/third_party/parser/ast"
 	"github.com/cectc/dbpack/third_party/parser/format"
 )
@@ -58,19 +59,23 @@ func (executor *prepareInsertExecutor) BeforeImage(ctx context.Context) (*schema
 }
 
 func (executor *prepareInsertExecutor) AfterImage(ctx context.Context) (*schema.TableRecords, error) {
-	var afterImage *schema.TableRecords	//定义返回值
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.ExecutorFetchAfterImage)
+	defer span.End()
+	var afterImage *schema.TableRecords
 	var err error
 	pkValues, err := executor.getPKValuesByColumn(ctx)	//拿到插入数据主键的值
 	if err != nil {
+		tracing.RecordErrorSpan(span, err)
 		return nil, err
 	}
 	if executor.getPKIndex(ctx) >= 0 {
-		afterImage, err = executor.buildTableRecords(ctx, pkValues)	//afterImage 是 TableRecords 类型
+		afterImage, err = executor.buildTableRecords(spanCtx, pkValues)	//afterImage 是 TableRecords 类型
 	} else {
 		pk, _ := executor.result.LastInsertId()
-		afterImage, err = executor.buildTableRecords(ctx, []interface{}{pk})
+		afterImage, err = executor.buildTableRecords(spanCtx, []interface{}{pk})
 	}
 	if err != nil {
+		tracing.RecordErrorSpan(span, err)
 		return nil, err
 	}
 	return afterImage, nil
@@ -97,7 +102,7 @@ func (executor *prepareInsertExecutor) buildTableRecords(ctx context.Context, pk
 	}
 	//SELECT appid,buyer_user_sysno,create_user,delivery_date,gmt_create,gmt_modified,memo,modify_user,order_date,payment_date,payment_type,receive_address,receive_contact,receive_contact_phone,receive_date,receive_division_sysno,receive_zip,seller_company_code,so_amt,so_id,status,stock_sysno,sysno FROM `order`.`so_master`  WHERE `sysno` IN (?)
 	afterImageSql := executor.buildAfterImageSql(tableMeta, pkValues)
-	result, _, err := executor.conn.PrepareQueryArgs(afterImageSql, pkValues)
+	result, _, err := executor.conn.PrepareQueryArgs(ctx, afterImageSql, pkValues)
 	if err != nil {
 		return nil, err
 	}

@@ -19,7 +19,6 @@ package dt
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"time"
 
 	"github.com/cectc/dbpack/pkg/tracing"
@@ -35,16 +34,13 @@ import (
 	"github.com/cectc/dbpack/pkg/log"
 	"github.com/cectc/dbpack/pkg/proto"
 	"github.com/cectc/dbpack/third_party/parser/ast"
-	"github.com/cectc/dbpack/third_party/parser/model"
 )
 
 const (
-	mysqlFilter    = "MysqlDistributedTransaction"
-	beforeImage    = "BeforeImage"
-	XID            = "x-dbpack-xid"
-	BranchID       = "x-dbpack-branch-id"
-	hintXID        = "XID"
-	hintGlobalLock = "GlobalLock"
+	mysqlFilter = "MysqlDistributedTransaction"
+	beforeImage = "BeforeImage"
+	XID         = "x-dbpack-xid"
+	BranchID    = "x-dbpack-branch-id"
 )
 
 type _mysqlFactory struct {
@@ -94,36 +90,36 @@ func (f *_mysqlFilter) GetKind() string {
 
 //mysql filter 需要执行的前置的内容
 func (f *_mysqlFilter) PreHandle(ctx context.Context, conn proto.Connection) error {
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.DTMysqlFilterPreHandle)
+	defer span.End()
+
 	var err error
 	bc := conn.(*driver.BackendConnection)
-	newCtx, span := tracing.GetTraceSpan(ctx, "mysql_filter_pre_handle")
-	defer span.End()
-	commandType := proto.CommandType(newCtx)
-
+	commandType := proto.CommandType(spanCtx)
 	switch commandType {
 	case constant.ComQuery:
-		stmt := proto.QueryStmt(newCtx)
+		stmt := proto.QueryStmt(spanCtx)
 		if stmt == nil {
 			return errors.New("query stmt should not be nil")
 		}
 		switch stmtNode := stmt.(type) {
 		case *ast.DeleteStmt:
-			err = f.processBeforeQueryDelete(newCtx, bc, stmtNode)
+			err = f.processBeforeQueryDelete(spanCtx, bc, stmtNode)
 		case *ast.UpdateStmt:
-			err = f.processBeforeQueryUpdate(newCtx, bc, stmtNode)
+			err = f.processBeforeQueryUpdate(spanCtx, bc, stmtNode)
 		default:
 			return nil
 		}
 	case constant.ComStmtExecute:	//只有delete和update需要beforeImage，insert为nil
-		stmt := proto.PrepareStmt(newCtx)
+		stmt := proto.PrepareStmt(spanCtx)
 		if stmt == nil {
 			return errors.New("prepare stmt should not be nil")
 		}
 		switch stmtNode := stmt.StmtNode.(type) {
 		case *ast.DeleteStmt:
-			err = f.processBeforePrepareDelete(newCtx, bc, stmt, stmtNode)
+			err = f.processBeforePrepareDelete(spanCtx, bc, stmt, stmtNode)
 		case *ast.UpdateStmt:
-			err = f.processBeforePrepareUpdate(newCtx, bc, stmt, stmtNode)
+			err = f.processBeforePrepareUpdate(spanCtx, bc, stmt, stmtNode)
 		default:
 			return nil
 		}
@@ -135,46 +131,47 @@ func (f *_mysqlFilter) PreHandle(ctx context.Context, conn proto.Connection) err
 
 //mysql filter 需要执行的后置的内容
 func (f *_mysqlFilter) PostHandle(ctx context.Context, result proto.Result, conn proto.Connection) error {
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.DTMysqlFilterPostHandle)
+	defer span.End()
+
 	var err error
 	bc := conn.(*driver.BackendConnection)
-	newCtx, span := tracing.GetTraceSpan(ctx, "mysql_filter_post_handle")
-	defer span.End()
-	commandType := proto.CommandType(newCtx)
+	commandType := proto.CommandType(spanCtx)
 	switch commandType {	//后置内容的分类
 	case constant.ComQuery:
-		stmt := proto.QueryStmt(newCtx)
+		stmt := proto.QueryStmt(spanCtx)
 		if stmt == nil {
 			return errors.New("query stmt should not be nil")
 		}
 		switch stmtNode := stmt.(type) {
 		case *ast.DeleteStmt:
-			err = f.processAfterQueryDelete(newCtx, bc, stmtNode)
+			err = f.processAfterQueryDelete(spanCtx, bc, stmtNode)
 		case *ast.InsertStmt:
-			err = f.processAfterQueryInsert(newCtx, bc, result, stmtNode)
+			err = f.processAfterQueryInsert(spanCtx, bc, result, stmtNode)
 		case *ast.UpdateStmt:
-			err = f.processAfterQueryUpdate(newCtx, bc, stmtNode)
+			err = f.processAfterQueryUpdate(spanCtx, bc, stmtNode)
 		case *ast.SelectStmt:
 			if stmtNode.LockInfo != nil && stmtNode.LockInfo.LockType == ast.SelectLockForUpdate {
-				err = f.processSelectForQueryUpdate(ctx, bc, result, stmtNode)
+				err = f.processQuerySelectForUpdate(ctx, bc, result, stmtNode)
 			}
 		default:
 			return nil
 		}
 	case constant.ComStmtExecute:
-		stmt := proto.PrepareStmt(newCtx)
+		stmt := proto.PrepareStmt(spanCtx)
 		if stmt == nil {
 			return errors.New("prepare stmt should not be nil")
 		}
 		switch stmtNode := stmt.StmtNode.(type) {	//根据delete、insert、update、select区分
 		case *ast.DeleteStmt:
-			err = f.processAfterPrepareDelete(newCtx, bc, stmt, stmtNode)
+			err = f.processAfterPrepareDelete(spanCtx, bc, stmt, stmtNode)
 		case *ast.InsertStmt:
-			err = f.processAfterPrepareInsert(newCtx, bc, result, stmt, stmtNode)
+			err = f.processAfterPrepareInsert(spanCtx, bc, result, stmt, stmtNode)
 		case *ast.UpdateStmt:
-			err = f.processAfterPrepareUpdate(newCtx, bc, stmt, stmtNode)
+			err = f.processAfterPrepareUpdate(spanCtx, bc, stmt, stmtNode)
 		case *ast.SelectStmt:
 			if stmtNode.LockInfo != nil && stmtNode.LockInfo.LockType == ast.SelectLockForUpdate {
-				err = f.processSelectForPrepareUpdate(newCtx, bc, result, stmt, stmtNode)
+				err = f.processPrepareSelectForUpdate(spanCtx, bc, result, stmt, stmtNode)
 			}
 		default:
 			return nil
@@ -190,6 +187,9 @@ func (f *_mysqlFilter) registerBranchTransaction(ctx context.Context, xid, resou
 		branchID int64
 		err      error
 	)
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.BranchTransactionRegister)
+	defer span.End()
+
 	br := &api.BranchRegisterRequest{
 		XID:             xid,
 		ResourceID:      resourceID,
@@ -198,7 +198,7 @@ func (f *_mysqlFilter) registerBranchTransaction(ctx context.Context, xid, resou
 		ApplicationData: nil,
 	}
 	for retryCount := 0; retryCount < f.lockRetryTimes; retryCount++ {
-		_, branchID, err = dt.GetDistributedTransactionManager().BranchRegister(ctx, br)	//注册分支事务到etcd，并锁住主键，并关联全局事务
+		_, branchID, err = dt.GetDistributedTransactionManager().BranchRegister(spanCtx, br)	//注册分支事务到etcd，并锁住主键，并关联全局事务
 		if err == nil {
 			break
 		}
@@ -211,26 +211,6 @@ func (f *_mysqlFilter) registerBranchTransaction(ctx context.Context, xid, resou
 		}
 	}
 	return branchID, err
-}
-
-func hasXIDHint(hints []*ast.TableOptimizerHint) (bool, string) {
-	for _, hint := range hints {
-		if strings.EqualFold(hint.HintName.String(), hintXID) {
-			hintData := hint.HintData.(model.CIStr)
-			xid := hintData.String()
-			return true, xid
-		}
-	}
-	return false, ""
-}
-
-func hasGlobalLockHint(hints []*ast.TableOptimizerHint) bool {
-	for _, hint := range hints {
-		if strings.EqualFold(hint.HintName.String(), hintGlobalLock) {
-			return true
-		}
-	}
-	return false
 }
 
 func init() {

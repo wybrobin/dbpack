@@ -46,7 +46,7 @@ func NewPrepareGlobalLockExecutor(
 	isUpdate bool,
 	deleteStmt *ast.DeleteStmt,
 	updateStmt *ast.UpdateStmt,
-	args map[string]interface{}) Executable {
+	args map[string]interface{}) GlobalLockExecutor {
 	return &prepareGlobalLockExecutor{
 		conn:       conn,
 		isUpdate:   isUpdate,
@@ -118,7 +118,7 @@ func (executor *prepareGlobalLockExecutor) BeforeImage(ctx context.Context) (*sc
 		parameterID := fmt.Sprintf("v%d", begin+1)
 		args = append(args, executor.args[parameterID])
 	}
-	result, _, err := executor.conn.PrepareQueryArgs(sql, args)
+	result, _, err := executor.conn.PrepareQueryArgs(ctx, sql, args)
 	if err != nil {
 		return nil, err
 	}

@@ -70,3 +70,30 @@
 
 * HttpDistributedTransaction filter support prefix matching ([148](https://github.com/CECTC/dbpack/pull/148])) ([cdb757a](https://github.com/cectc/dbpack/commit/cdb757ad70ccd3dc5f07fa7ff22a2c523adc0e6a))
 * HttpDistributedTransaction filter support regular matching ([149](https://github.com/CECTC/dbpack/pull/149])) ([cdb757a](https://github.com/cectc/dbpack/commit/cdb757ad70ccd3dc5f07fa7ff22a2c523adc0e6a))
+
+## v0.2.0
+
+### Bug Fixes
+
+* currentRecords may be nil ([157](https://github.com/CECTC/dbpack/pull/157)) ([e7c8747](https://github.com/CECTC/dbpack/commit/e7c8747747144241e9841c56b3fd88e60fc01516))
+* php 8.0 pdo will check the flag bit ([163](https://github.com/CECTC/dbpack/pull/163)) ([0fd83bb](https://github.com/CECTC/dbpack/commit/0fd83bb963701efe8a35f1dbafb7b499e055c233))
+* borrowed connections should be returned when not in use ([164](https://github.com/CECTC/dbpack/pull/164)) ([b1c8330](https://github.com/CECTC/dbpack/commit/b1c8330af05e2f10c2bbe5c6584f7d1f98ef0945))
+* load balance algorithm unmarshal error ([169](https://github.com/CECTC/dbpack/pull/169)) ([7819ce9](https://github.com/CECTC/dbpack/commit/7819ce95250a989104c4994b004b01a7e8801dee))
+
+## Features
+
+* support usedb hint for customize the sql routing ([13](https://github.com/CECTC/dbpack/issues/13)) ([be37d88](https://github.com/CECTC/dbpack/commit/be37d88f356e807d90fe57ffe17296752f65b7d5))
+* audit log filter ([103](https://github.com/CECTC/dbpack/issues/103)) ([e7f819d](https://github.com/CECTC/dbpack/commit/e7f819da076b7534dbc56d90dea3cd6c147eb64d))
+
+## v0.2.1
+
+### Bug Fixes
+
+* in tcc mode, json.Unmarshal requestContext.Headers failed ([194](https://github.com/CECTC/dbpack/issues/194)) ([6e1f8c3](https://github.com/CECTC/dbpack/commit/6e1f8c3b7a9b558e72ed84807cfb0364e1fc89c0))
+
+## v0.2.2
+
+### Changes
+
+* refactor: AuditLog filter PreHandle support more stmtnode type ([198](https://github.com/CECTC/dbpack/pull/198)) ([bb408a5](https://github.com/CECTC/dbpack/commit/bb408a5f7f1f22e5c5a5927e24b0f0316e0b6e12))
+* refactor: support manipulating the same data in different transaction… ([199](https://github.com/CECTC/dbpack/issues/199)) ([040b4d1](https://github.com/CECTC/dbpack/commit/040b4d14968ab96c5933fc6dad5968668c151e45))

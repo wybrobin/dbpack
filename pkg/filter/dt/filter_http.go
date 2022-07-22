@@ -18,6 +18,7 @@ package dt
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -29,6 +30,7 @@ import (
 	"github.com/cectc/dbpack/pkg/filter"
 	"github.com/cectc/dbpack/pkg/log"
 	"github.com/cectc/dbpack/pkg/proto"
+	"github.com/cectc/dbpack/pkg/tracing"
 )
 
 const httpFilter = "HttpDistributedTransaction"
@@ -126,7 +128,6 @@ type TccResourceInfo struct {
 // HttpFilterConfig http filter config
 type HttpFilterConfig struct {
 	ApplicationID string `yaml:"appid" json:"appid"`
-	BackendHost   string `yaml:"backend_host" json:"backend_host"`
 
 	TransactionInfos []*TransactionInfo `yaml:"transaction_infos" json:"transaction_infos"`
 	TCCResourceInfos []*TccResourceInfo `yaml:"tcc_resource_infos" json:"tcc_resource_infos"`
@@ -140,23 +141,28 @@ type _httpFilter struct {
 	tccResourceInfoMap map[string]*TccResourceInfo
 }
 
+var _ proto.HttpPostFilter = (*_httpFilter)(nil)
+var _ proto.HttpPostFilter = (*_httpFilter)(nil)
+
 func (f *_httpFilter) GetKind() string {
 	return httpFilter
 }
 
-func (f _httpFilter) PreHandle(ctx *fasthttp.RequestCtx) error {
-	path := ctx.Request.RequestURI()
-	method := ctx.Method()
+func (f _httpFilter) PreHandle(ctx context.Context, fastHttpCtx *fasthttp.RequestCtx) error {
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.DTHttpFilterPreHandle)
+	defer span.End()
 
+	path := fastHttpCtx.Request.RequestURI()
+	method := fastHttpCtx.Method()
 	if !strings.EqualFold(string(method), fasthttp.MethodPost) {
 		return nil
 	}
 
 	transactionInfo, found := f.matchTransactionInfo(string(path))
 	if found {
-		result, err := f.handleHttp1GlobalBegin(ctx, transactionInfo)	//开启全局事务xid，并把把xid写入etcd，同时写到ctx的head里
+		result, err := f.handleHttp1GlobalBegin(spanCtx, fastHttpCtx, transactionInfo)	//开启全局事务xid，并把把xid写入etcd，同时写到ctx的head里
 		if !result {//出错就回滚
-			if err := f.handleHttp1GlobalEnd(ctx); err != nil {
+			if err := f.handleHttp1GlobalEnd(spanCtx, fastHttpCtx); err != nil {
 				log.Error(err)
 			}
 		}
@@ -166,9 +172,9 @@ func (f _httpFilter) PreHandle(ctx *fasthttp.RequestCtx) error {
 	//这个sample里没用上，感觉是某个节点作为tcc模式的一个分支时，需要提前注册branch
 	tccResource, exists := f.tccResourceInfoMap[strings.ToLower(string(path))]
 	if exists {
-		result, err := f.handleHttp1BranchRegister(ctx, tccResource)
+		result, err := f.handleHttp1BranchRegister(spanCtx, fastHttpCtx, tccResource)
 		if !result {
-			if err := f.handleHttp1BranchEnd(ctx); err != nil {
+			if err := f.handleHttp1BranchEnd(spanCtx, fastHttpCtx); err != nil {
 				log.Error(err)
 			}
 		}
@@ -177,18 +183,19 @@ func (f _httpFilter) PreHandle(ctx *fasthttp.RequestCtx) error {
 	return nil
 }
 
-func (f _httpFilter) PostHandle(ctx *fasthttp.RequestCtx) error {
-	path := ctx.Request.RequestURI()
-	method := ctx.Method()
-
+func (f _httpFilter) PostHandle(ctx context.Context, fastHttpCtx *fasthttp.RequestCtx) error {
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.DTHttpFilterPostHandle)
+	defer span.End()
 	//为什么一定要POST呢？？？GET不行？
+	path := fastHttpCtx.Request.RequestURI()
+	method := fastHttpCtx.Method()
 	if !strings.EqualFold(string(method), fasthttp.MethodPost) {
 		return nil
 	}
 
 	_, found := f.transactionInfoMap[strings.ToLower(string(path))]
 	if found {
-		if err := f.handleHttp1GlobalEnd(ctx); err != nil {
+		if err := f.handleHttp1GlobalEnd(spanCtx, fastHttpCtx); err != nil {
 			return err
 		}
 	}
@@ -196,7 +203,7 @@ func (f _httpFilter) PostHandle(ctx *fasthttp.RequestCtx) error {
 	//应该是用于TCC的，http作为中间的一个节点，branch结束
 	_, exists := f.tccResourceInfoMap[strings.ToLower(string(path))]
 	if exists {
-		if err := f.handleHttp1BranchEnd(ctx); err != nil {
+		if err := f.handleHttp1BranchEnd(spanCtx, fastHttpCtx); err != nil {
 			return err
 		}
 	}

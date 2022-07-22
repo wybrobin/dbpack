@@ -61,8 +61,12 @@ func TestMergeResultWithOutOrderByAndLimit(t *testing.T) {
 	buildStudents1(10015)
 	patch1 := buildRowsNextPatch(10015)
 	defer patch1.Reset()
+	patch2 := buildTextRowDecodePatch()
+	defer patch2.Reset()
+	patch3 := buildBinaryRowDecodePatch()
+	defer patch3.Reset()
 	merge := func(commandType int) (*mysql.MergeResult, uint16) {
-		return mergeResultWithOutOrderByAndLimit(proto.WithCommandType(context.Background(), byte(commandType)),
+		return mergeResultWithoutOrderByAndLimit(proto.WithCommandType(context.Background(), byte(commandType)),
 			[]*ResultWithErr{
 				{
 					Result:  &mysql.Result{},
@@ -79,6 +83,50 @@ func TestMergeResultWithOutOrderByAndLimit(t *testing.T) {
 					Warning: 0,
 					Error:   nil,
 				},
+			})
+	}
+	t.Log("Merge COM_QUERY result:")
+	result, _ := merge(constant.ComQuery)
+	for _, row := range result.Rows {
+		t.Logf("%s", row.Data())
+	}
+	begin.Swap(10000)
+	t.Log("Merge COM_STMT_EXECUTE result:")
+	result, _ = merge(constant.ComStmtExecute)
+	for _, row := range result.Rows {
+		t.Logf("%s", row.Data())
+	}
+}
+
+func TestMergeResultWithLimit(t *testing.T) {
+	buildStudents1(10050)
+	patch1 := buildRowsNextPatch(10050)
+	defer patch1.Reset()
+	patch2 := buildTextRowDecodePatch()
+	defer patch2.Reset()
+	patch3 := buildBinaryRowDecodePatch()
+	defer patch3.Reset()
+	merge := func(commandType int) (*mysql.MergeResult, uint16) {
+		return mergeResultWithLimit(proto.WithCommandType(context.Background(), byte(commandType)),
+			[]*ResultWithErr{
+				{
+					Result:  &mysql.Result{},
+					Warning: 0,
+					Error:   nil,
+				},
+				{
+					Result:  &mysql.Result{},
+					Warning: 0,
+					Error:   nil,
+				},
+				{
+					Result:  &mysql.Result{},
+					Warning: 0,
+					Error:   nil,
+				},
+			}, &Limit{
+				Offset: 20,
+				Count:  10,
 			})
 	}
 	t.Log("Merge COM_QUERY result:")

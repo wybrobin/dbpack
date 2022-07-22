@@ -21,14 +21,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cectc/dbpack/pkg/tracing"
-
 	"github.com/pkg/errors"
 	"github.com/uber-go/atomic"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/cectc/dbpack/pkg/driver"
 	"github.com/cectc/dbpack/pkg/log"
 	"github.com/cectc/dbpack/pkg/proto"
+	"github.com/cectc/dbpack/pkg/tracing"
 	"github.com/cectc/dbpack/third_party/pools"
 )
 
@@ -62,12 +62,14 @@ func NewDB(name string, pingInterval time.Duration,
 }
 
 func (db *DB) UseDB(ctx context.Context, schema string) error {
-	newCtx, span := tracing.GetTraceSpan(ctx, "db_use")
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.DBUse)
+	span.SetAttributes(attribute.KeyValue{Key: "db", Value: attribute.StringValue(db.name)})
 	defer span.End()
+
 	db.inflightRequests.Inc()
 	defer db.inflightRequests.Dec()
 
-	r, err := db.pool.Get(newCtx)
+	r, err := db.pool.Get(spanCtx)
 	if err != nil {
 		err = errors.WithStack(err)
 		return err
@@ -79,12 +81,14 @@ func (db *DB) UseDB(ctx context.Context, schema string) error {
 }
 
 func (db *DB) ExecuteFieldList(ctx context.Context, table, wildcard string) ([]proto.Field, error) {
-	newCtx, span := tracing.GetTraceSpan(ctx, "db_exec_field_list")
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.DBExecFieldList)
+	span.SetAttributes(attribute.KeyValue{Key: "db", Value: attribute.StringValue(db.name)})
 	defer span.End()
+
 	db.inflightRequests.Inc()
 	defer db.inflightRequests.Dec()
 
-	r, err := db.pool.Get(newCtx)
+	r, err := db.pool.Get(spanCtx)
 	if err != nil {
 		err = errors.WithStack(err)
 		return nil, err
@@ -109,12 +113,15 @@ func (db *DB) ExecuteFieldList(ctx context.Context, table, wildcard string) ([]p
 }
 
 func (db *DB) Query(ctx context.Context, query string) (proto.Result, uint16, error) {
-	newCtx, span := tracing.GetTraceSpan(ctx, "db_query")
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.DBQuery)
+	span.SetAttributes(attribute.KeyValue{Key: "db", Value: attribute.StringValue(db.name)},
+		attribute.KeyValue{Key: "sql", Value: attribute.StringValue(query)})
 	defer span.End()
+
 	db.inflightRequests.Inc()
 	defer db.inflightRequests.Dec()
 
-	r, err := db.pool.Get(newCtx)
+	r, err := db.pool.Get(spanCtx)
 	if err != nil {
 		err = errors.WithStack(err)
 		return nil, 0, err
@@ -122,20 +129,27 @@ func (db *DB) Query(ctx context.Context, query string) (proto.Result, uint16, er
 	defer db.pool.Put(r)
 
 	conn := r.(*driver.BackendConnection)
-	if err := db.doConnectionPreFilter(newCtx, conn); err != nil {
+	if err := db.doConnectionPreFilter(spanCtx, conn); err != nil {
 		return nil, 0, err
 	}
-	result, warn, err := conn.ExecuteWithWarningCount(query, true)
+
+	result, warn, err := conn.ExecuteWithWarningCount(spanCtx, query, true)
 	if err != nil {
 		return result, warn, err
 	}
-	if err := db.doConnectionPostFilter(newCtx, result, conn); err != nil {
+	if err := db.doConnectionPostFilter(spanCtx, result, conn); err != nil {
 		return nil, 0, err
 	}
 	return result, warn, err
 }
 
 func (db *DB) ExecuteStmt(ctx context.Context, stmt *proto.Stmt) (proto.Result, uint16, error) {
+	query := stmt.StmtNode.Text()
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.DBExecStmt)
+	span.SetAttributes(attribute.KeyValue{Key: "db", Value: attribute.StringValue(db.name)},
+		attribute.KeyValue{Key: "sql", Value: attribute.StringValue(query)})
+	defer span.End()
+
 	db.inflightRequests.Inc()
 	defer db.inflightRequests.Dec()
 
@@ -154,49 +168,48 @@ func (db *DB) ExecuteStmt(ctx context.Context, stmt *proto.Stmt) (proto.Result, 
 	defer db.pool.Put(r)
 
 	conn := r.(*driver.BackendConnection)
-	query := stmt.StmtNode.Text()
-	if err := db.doConnectionPreFilter(ctx, conn); err != nil {
+	if err := db.doConnectionPreFilter(spanCtx, conn); err != nil {
 		return nil, 0, err
 	}
-	if stmt.HasLongDataParam {
-		for i := 0; i < len(stmt.BindVars); i++ {
-			parameterID := fmt.Sprintf("v%d", i+1)
-			args = append(args, stmt.BindVars[parameterID])
-		}
-		result, warn, err = conn.PrepareQueryArgs(query, args)
-	} else {
-		result, warn, err = conn.PrepareQuery(query, stmt.ParamData)
+	for i := 0; i < len(stmt.BindVars); i++ {
+		parameterID := fmt.Sprintf("v%d", i+1)
+		args = append(args, stmt.BindVars[parameterID])
 	}
+	result, warn, err = conn.PrepareQueryArgs(spanCtx, query, args)
 	if err != nil {
 		return result, warn, err
 	}
-	if err := db.doConnectionPostFilter(ctx, result, conn); err != nil {
+	if err := db.doConnectionPostFilter(spanCtx, result, conn); err != nil {
 		return nil, 0, err
 	}
 	return result, warn, err
 }
 
 func (db *DB) ExecuteSql(ctx context.Context, sql string, args ...interface{}) (proto.Result, uint16, error) {
-	newCtx, span := tracing.GetTraceSpan(ctx, "db_exec_sql")
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.DBExecSQL)
+	span.SetAttributes(attribute.KeyValue{Key: "db", Value: attribute.StringValue(db.name)},
+		attribute.KeyValue{Key: "sql", Value: attribute.StringValue(sql)})
 	defer span.End()
+
 	db.inflightRequests.Inc()
 	defer db.inflightRequests.Dec()
 
-	r, err := db.pool.Get(newCtx)
+	r, err := db.pool.Get(spanCtx)
 	if err != nil {
 		err = errors.WithStack(err)
 		return nil, 0, err
 	}
 	defer db.pool.Put(r)
 	conn := r.(*driver.BackendConnection)
-	if err := db.doConnectionPreFilter(newCtx, conn); err != nil {
+	if err := db.doConnectionPreFilter(spanCtx, conn); err != nil {
 		return nil, 0, err
 	}
-	result, warn, err := conn.PrepareQueryArgs(sql, args)
+	// TODO PrepareQueryArgs support ctx
+	result, warn, err := conn.PrepareQueryArgs(spanCtx, sql, args)
 	if err != nil {
 		return result, warn, err
 	}
-	if err := db.doConnectionPostFilter(newCtx, result, conn); err != nil {
+	if err := db.doConnectionPostFilter(spanCtx, result, conn); err != nil {
 		return nil, 0, err
 	}
 	return result, warn, err
@@ -208,9 +221,12 @@ func (db *DB) Begin(ctx context.Context) (proto.Tx, proto.Result, error) {
 		conn   *driver.BackendConnection
 		err    error
 	)
-	newCtx, span := tracing.GetTraceSpan(ctx, "db_tx_begin")
+
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.DBLocalTransactionBegin)
+	span.SetAttributes(attribute.KeyValue{Key: "db", Value: attribute.StringValue(db.name)})
 	defer span.End()
-	r, err := db.pool.Get(newCtx)
+
+	r, err := db.pool.Get(spanCtx)
 	if err != nil {
 		err = errors.WithStack(err)
 		return nil, nil, err

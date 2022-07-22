@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cectc/dbpack/pkg/tracing"
+
 	"github.com/cectc/dbpack/pkg/driver"
 	"github.com/cectc/dbpack/pkg/dt"
 	"github.com/cectc/dbpack/pkg/dt/schema"
@@ -53,8 +55,11 @@ func NewPrepareSelectForUpdateExecutor(
 	}
 }
 
-func (executor *prepareSelectForUpdateExecutor) Executable(ctx context.Context, lockRetryInterval time.Duration, lockRetryTimes int) (bool, error) {
-	tableMeta, err := executor.GetTableMeta(ctx)
+func (executor *prepareSelectForUpdateExecutor) Executable(ctx context.Context, xid string, lockRetryInterval time.Duration, lockRetryTimes int) (bool, error) {
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.Executable)
+	defer span.End()
+
+	tableMeta, err := executor.GetTableMeta(spanCtx)
 	if err != nil {
 		return false, err
 	}
@@ -70,8 +75,8 @@ func (executor *prepareSelectForUpdateExecutor) Executable(ctx context.Context, 
 			err      error
 		)
 		for i := 0; i < lockRetryTimes; i++ {
-			lockable, err = dt.GetDistributedTransactionManager().IsLockable(ctx,
-				executor.conn.DataSourceName(), lockKeys)
+			lockable, err = dt.GetDistributedTransactionManager().IsLockableWithXID(spanCtx,
+				executor.conn.DataSourceName(), lockKeys, xid)
 			if lockable && err == nil {
 				break
 			}

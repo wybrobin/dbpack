@@ -30,14 +30,18 @@ import (
 	"github.com/cectc/dbpack/pkg/log"
 	"github.com/cectc/dbpack/pkg/misc"
 	"github.com/cectc/dbpack/pkg/proto"
+	"github.com/cectc/dbpack/pkg/visitor"
 	"github.com/cectc/dbpack/third_party/parser/ast"
 	"github.com/cectc/dbpack/third_party/parser/format"
 	driver "github.com/cectc/dbpack/third_party/types/parser_driver"
 )
 
+const FuncColumns = "FuncColumns"
+
 type QueryOnSingleDBPlan struct {
 	Database string
 	Tables   []string
+	PK       string
 	Stmt     *ast.SelectStmt
 	Limit    *Limit
 	Args     []interface{}
@@ -50,14 +54,14 @@ type Limit struct {
 	Count            int64
 }
 
-func (p *QueryOnSingleDBPlan) Execute(ctx context.Context) (proto.Result, uint16, error) {
+func (p *QueryOnSingleDBPlan) Execute(ctx context.Context, hints ...*ast.TableOptimizerHint) (proto.Result, uint16, error) {
 	var (
 		sb   strings.Builder
 		args []interface{}
 		err  error
 	)
 	p.castLimit()
-	if err = p.generate(&sb, &args); err != nil {
+	if err = p.generate(ctx, &sb, &args); err != nil {
 		return nil, 0, errors.WithStack(err)
 	}
 	sql := sb.String()
@@ -73,7 +77,7 @@ func (p *QueryOnSingleDBPlan) Execute(ctx context.Context) (proto.Result, uint16
 	}
 }
 
-func (p *QueryOnSingleDBPlan) generate(sb *strings.Builder, args *[]interface{}) (err error) {
+func (p *QueryOnSingleDBPlan) generate(ctx context.Context, sb *strings.Builder, args *[]interface{}) (err error) {
 	switch len(p.Tables) {
 	case 0:
 		err = generateSelect("", p.Stmt, sb, p.Limit)
@@ -83,9 +87,8 @@ func (p *QueryOnSingleDBPlan) generate(sb *strings.Builder, args *[]interface{})
 		err = generateSelect(p.Tables[0], p.Stmt, sb, p.Limit)
 		p.appendArgs(args)
 	default:
-		if p.Stmt.OrderBy != nil {
-			sb.WriteString("SELECT * FROM (")
-		}
+		sb.WriteString("SELECT * FROM (")
+
 		sb.WriteByte('(')
 		if err = generateSelect(p.Tables[0], p.Stmt, sb, p.Limit); err != nil {
 			return
@@ -103,11 +106,20 @@ func (p *QueryOnSingleDBPlan) generate(sb *strings.Builder, args *[]interface{})
 			sb.WriteByte(')')
 			p.appendArgs(args)
 		}
+		sb.WriteString(") t ")
 		if p.Stmt.OrderBy != nil {
-			sb.WriteString(") t ")
 			restoreCtx := format.NewRestoreCtx(format.DefaultRestoreFlags, sb)
 			if err := p.Stmt.OrderBy.Restore(restoreCtx); err != nil {
 				return errors.WithStack(err)
+			}
+		} else {
+			var funcColumnList []*visitor.FuncColumn
+			funcColumns := proto.Variable(ctx, FuncColumns)
+			if funcColumns != nil {
+				funcColumnList = funcColumns.([]*visitor.FuncColumn)
+			}
+			if len(funcColumnList) == 0 {
+				sb.WriteString(fmt.Sprintf("ORDER BY `%s` ASC", p.PK))
 			}
 		}
 	}
@@ -164,7 +176,9 @@ type QueryOnMultiDBPlan struct {
 	Plans []*QueryOnSingleDBPlan
 }
 
-func (p *QueryOnMultiDBPlan) Execute(ctx context.Context) (proto.Result, uint16, error) {
+func (p *QueryOnMultiDBPlan) Execute(ctx context.Context, _ ...*ast.TableOptimizerHint) (proto.Result, uint16, error) {
+	funcColumns := visitFuncColumn(p.Stmt)
+	proto.WithVariable(ctx, FuncColumns, funcColumns)
 	resultChan := make(chan *ResultWithErr, len(p.Plans))
 	var wg sync.WaitGroup
 	wg.Add(len(p.Plans))
@@ -193,6 +207,7 @@ func (p *QueryOnMultiDBPlan) Execute(ctx context.Context) (proto.Result, uint16,
 	}
 	sort.Sort(ResultWithErrs(resultList))
 	result, warn := mergeResult(ctx, resultList, p.Stmt.OrderBy, p.Plans[0].Limit)
+	aggregateResult(ctx, result)
 	return result, warn, nil
 }
 
@@ -258,7 +273,7 @@ func generateSelect(table string, stmt *ast.SelectStmt, sb *strings.Builder, lim
 	if limit != nil {
 		sb.WriteByte(' ')
 		limitCount := limit.Offset + limit.Count
-		sb.WriteString(fmt.Sprintf("limit %d", limitCount))
+		sb.WriteString(fmt.Sprintf("LIMIT %d", limitCount))
 	}
 
 	return nil

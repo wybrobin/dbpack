@@ -44,7 +44,7 @@ func NewQueryGlobalLockExecutor(
 	conn *driver.BackendConnection,
 	isUpdate bool,
 	deleteStmt *ast.DeleteStmt,
-	updateStmt *ast.UpdateStmt) Executable {
+	updateStmt *ast.UpdateStmt) GlobalLockExecutor {
 	return &queryGlobalLockExecutor{
 		conn:       conn,
 		isUpdate:   isUpdate,
@@ -54,6 +54,34 @@ func NewQueryGlobalLockExecutor(
 }
 
 func (executor *queryGlobalLockExecutor) Executable(ctx context.Context, lockRetryInterval time.Duration, lockRetryTimes int) (bool, error) {
+	beforeImage, err := executor.BeforeImage(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	lockKeys := schema.BuildLockKey(beforeImage)
+	if lockKeys == "" {
+		return true, nil
+	} else {
+		var (
+			err      error
+			lockable bool
+		)
+		for i := 0; i < lockRetryTimes; i++ {
+			lockable, err = dt.GetDistributedTransactionManager().IsLockable(ctx,
+				executor.conn.DataSourceName(), lockKeys)
+			if err != nil {
+				time.Sleep(lockRetryInterval)
+			}
+			if lockable {
+				return true, nil
+			}
+		}
+		return false, err
+	}
+}
+
+func (executor *queryGlobalLockExecutor) ExecutableWithXID(ctx context.Context, xid string, lockRetryInterval time.Duration, lockRetryTimes int) (bool, error) {
 	beforeImage, err := executor.BeforeImage(ctx)
 	if err != nil {
 		return false, err
@@ -108,7 +136,7 @@ func (executor *queryGlobalLockExecutor) BeforeImage(ctx context.Context) (*sche
 	}
 
 	sql := executor.buildBeforeImageSql(tableMeta)
-	result, _, err := executor.conn.ExecuteWithWarningCount(sql, true)
+	result, _, err := executor.conn.ExecuteWithWarningCount(ctx, sql, true)
 	if err != nil {
 		return nil, err
 	}

@@ -19,6 +19,7 @@ package rws
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql" // register mysql
 	"github.com/stretchr/testify/suite"
@@ -28,12 +29,14 @@ const (
 	driverName                            = "mysql"
 	dataSourceName                        = "dksl:123456@tcp(127.0.0.1:13306)/drug?timeout=10s&readTimeout=10s&writeTimeout=10s&parseTime=true&loc=Local&charset=utf8mb4,utf8"
 	selectDrugResource                    = "select id, drug_res_type_id, base_type, sale_price from drug_resource where id between ? and ?"
+	selectDrugResourceLimit               = "select id, drug_res_type_id, base_type, sale_price from drug_resource where id between ? and ? limit ?,?"
 	selectDrugResourceOrderBy1            = "select id, drug_res_type_id, base_type, sale_price from drug_resource where id between ? and ? order by id desc"
 	selectDrugResourceOrderBy2            = "select id, drug_res_type_id, manufacturer_id, sale_price from drug_resource where id between ? and ? order by manufacturer_id desc, id asc"
 	selectDrugResourceOrderByIDDescLimit  = "select id, drug_res_type_id, base_type, sale_price from drug_resource where id between ? and ? order by id desc limit ?, ?"
 	selectDrugResourceOrderByIDDescLimit2 = "select id, drug_res_type_id, base_type, sale_price from drug_resource where id between ? and ? order by id desc limit ?"
+	selectCount                           = "select count(1) from drug_resource where manufacturer_id = ?"
 
-	deleteDrugResource = "delete from drug_resource where id = ?"
+	deleteDrugResource = "delete from drug_resource where id between ? and ?"
 	insertDrugResource = "INSERT INTO `drug_resource`(`id`, `drug_res_type_id`, `base_type`, `status`, `type_id`, " +
 		"`dict_dosage_id`, `code`, `pym`, `name`, `manufacturer_id`, `approval_no`, `med_type`, `admin_code`, " +
 		"`pack_unit_id`, `min_unit_id`, `pack_quantity`, `dosage_unit_id`, `dosage_quantity`, `pack_spec`, `take_method_id`, " +
@@ -64,6 +67,23 @@ func (suite *_ShardingSuite) SetupSuite() {
 
 func (suite *_ShardingSuite) TestSelect() {
 	rows, err := suite.db.Query(selectDrugResource, 200, 210)
+	if suite.NoErrorf(err, "select row error: %v", err) {
+		var (
+			id            int64
+			drugResTypeId string
+			baseType      int
+			salePrice     float32
+		)
+		for rows.Next() {
+			err := rows.Scan(&id, &drugResTypeId, &baseType, &salePrice)
+			suite.NoError(err)
+			suite.T().Logf("id: %d, drug resource type id: %s, base type: %d, sale price: %v", id, drugResTypeId, baseType, salePrice)
+		}
+	}
+}
+
+func (suite *_ShardingSuite) TestSelectLimit() {
+	rows, err := suite.db.Query(selectDrugResourceLimit, 200, 250, 20, 10)
 	if suite.NoErrorf(err, "select row error: %v", err) {
 		var (
 			id            int64
@@ -147,12 +167,27 @@ func (suite *_ShardingSuite) TestSelectOrderByAndLimit2() {
 	}
 }
 
+func (suite *_ShardingSuite) TestSelectCount() {
+	rows, err := suite.db.Query(selectCount, "sccj_w")
+	if suite.NoErrorf(err, "select row error: %v", err) {
+		var (
+			count int64
+		)
+		for rows.Next() {
+			err := rows.Scan(&count)
+			suite.NoError(err)
+			suite.T().Logf("count: %d", count)
+		}
+	}
+}
+
 func (suite *_ShardingSuite) TestDeleteDrugResource() {
-	result, err := suite.db.Exec(deleteDrugResource, 20)
+	result, err := suite.db.Exec(deleteDrugResource, 10, 20)
 	suite.Assert().Nil(err)
 	affectedRows, err := result.RowsAffected()
 	suite.Assert().Nil(err)
-	suite.Assert().Equal(int64(1), affectedRows)
+	suite.Assert().Equal(int64(11), affectedRows)
+	time.Sleep(10 * time.Second)
 }
 
 func (suite *_ShardingSuite) TestInsertDrugResource() {

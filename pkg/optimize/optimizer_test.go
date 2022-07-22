@@ -46,6 +46,95 @@ func TestOptimizeQueryOnSingleDB(t *testing.T) {
 		return
 	}
 	stmt.Accept(&visitor.ParamVisitor{})
+
+	resource.SetDBManager(&resource.DBManager{})
+	var cache *meta.MysqlTableMetaCache
+	patches := gomonkey.ApplyMethodFunc(cache, "GetTableMeta", func(ctx context.Context, db proto.DB, tableName string) (schema.TableMeta, error) {
+		return schema.TableMeta{
+			SchemaName: "school",
+			TableName:  "student",
+			Columns:    []string{"id", "age"},
+			AllColumns: map[string]schema.ColumnMeta{
+				"id": {
+					TableCat:        "def",
+					TableSchemeName: "school",
+					TableName:       "student",
+					ColumnName:      "id",
+					DataType:        -5,
+					DataTypeName:    "bigint",
+					ColumnSize:      0,
+					DecimalDigits:   19,
+					NumPrecRadix:    0,
+					Nullable:        0,
+					Remarks:         "",
+					ColumnDef:       "",
+					SqlDataType:     0,
+					SqlDatetimeSub:  0,
+					CharOctetLength: 0,
+					OrdinalPosition: 1,
+					IsNullable:      "NO",
+					IsAutoIncrement: "auto_increment",
+				},
+				"age": {
+					TableCat:        "def",
+					TableSchemeName: "school",
+					TableName:       "student",
+					ColumnName:      "age",
+					DataType:        0,
+					DataTypeName:    "int",
+					ColumnSize:      0,
+					DecimalDigits:   10,
+					NumPrecRadix:    0,
+					Nullable:        0,
+					Remarks:         "",
+					ColumnDef:       "",
+					SqlDataType:     0,
+					SqlDatetimeSub:  0,
+					CharOctetLength: 0,
+					OrdinalPosition: 2,
+					IsNullable:      "NO",
+					IsAutoIncrement: "",
+				},
+			},
+			AllIndexes: map[string]schema.IndexMeta{
+				"id": {
+					Values: []schema.ColumnMeta{
+						{
+							TableCat:        "def",
+							TableSchemeName: "school",
+							TableName:       "student",
+							ColumnName:      "id",
+							DataType:        -5,
+							DataTypeName:    "bigint",
+							ColumnSize:      0,
+							DecimalDigits:   19,
+							NumPrecRadix:    0,
+							Nullable:        0,
+							Remarks:         "",
+							ColumnDef:       "",
+							SqlDataType:     0,
+							SqlDatetimeSub:  0,
+							CharOctetLength: 0,
+							OrdinalPosition: 1,
+							IsNullable:      "NO",
+							IsAutoIncrement: "auto_increment",
+						},
+					},
+					NonUnique:       false,
+					IndexQualifier:  "",
+					IndexName:       "PRIMARY",
+					ColumnName:      "id",
+					Type:            0,
+					IndexType:       schema.IndexTypePrimary,
+					AscOrDesc:       "A",
+					Cardinality:     1,
+					OrdinalPosition: 1,
+				},
+			},
+		}, nil
+	})
+	defer patches.Reset()
+
 	pl, err := o.Optimize(context.Background(), stmt, args...)
 	assert.Equal(t, nil, err)
 	queryPlan, ok := pl.(*plan.QueryOnSingleDBPlan)
@@ -66,6 +155,95 @@ func TestOptimizeQueryOnMultiDB(t *testing.T) {
 		return
 	}
 	stmt.Accept(&visitor.ParamVisitor{})
+
+	resource.SetDBManager(&resource.DBManager{})
+	var cache *meta.MysqlTableMetaCache
+	patches := gomonkey.ApplyMethodFunc(cache, "GetTableMeta", func(ctx context.Context, db proto.DB, tableName string) (schema.TableMeta, error) {
+		return schema.TableMeta{
+			SchemaName: "school",
+			TableName:  "student",
+			Columns:    []string{"id", "age"},
+			AllColumns: map[string]schema.ColumnMeta{
+				"id": {
+					TableCat:        "def",
+					TableSchemeName: "school",
+					TableName:       "student",
+					ColumnName:      "id",
+					DataType:        -5,
+					DataTypeName:    "bigint",
+					ColumnSize:      0,
+					DecimalDigits:   19,
+					NumPrecRadix:    0,
+					Nullable:        0,
+					Remarks:         "",
+					ColumnDef:       "",
+					SqlDataType:     0,
+					SqlDatetimeSub:  0,
+					CharOctetLength: 0,
+					OrdinalPosition: 1,
+					IsNullable:      "NO",
+					IsAutoIncrement: "auto_increment",
+				},
+				"age": {
+					TableCat:        "def",
+					TableSchemeName: "school",
+					TableName:       "student",
+					ColumnName:      "age",
+					DataType:        0,
+					DataTypeName:    "int",
+					ColumnSize:      0,
+					DecimalDigits:   10,
+					NumPrecRadix:    0,
+					Nullable:        0,
+					Remarks:         "",
+					ColumnDef:       "",
+					SqlDataType:     0,
+					SqlDatetimeSub:  0,
+					CharOctetLength: 0,
+					OrdinalPosition: 2,
+					IsNullable:      "NO",
+					IsAutoIncrement: "",
+				},
+			},
+			AllIndexes: map[string]schema.IndexMeta{
+				"id": {
+					Values: []schema.ColumnMeta{
+						{
+							TableCat:        "def",
+							TableSchemeName: "school",
+							TableName:       "student",
+							ColumnName:      "id",
+							DataType:        -5,
+							DataTypeName:    "bigint",
+							ColumnSize:      0,
+							DecimalDigits:   19,
+							NumPrecRadix:    0,
+							Nullable:        0,
+							Remarks:         "",
+							ColumnDef:       "",
+							SqlDataType:     0,
+							SqlDatetimeSub:  0,
+							CharOctetLength: 0,
+							OrdinalPosition: 1,
+							IsNullable:      "NO",
+							IsAutoIncrement: "auto_increment",
+						},
+					},
+					NonUnique:       false,
+					IndexQualifier:  "",
+					IndexName:       "PRIMARY",
+					ColumnName:      "id",
+					Type:            0,
+					IndexType:       schema.IndexTypePrimary,
+					AscOrDesc:       "A",
+					Cardinality:     1,
+					OrdinalPosition: 1,
+				},
+			},
+		}, nil
+	})
+	defer patches.Reset()
+
 	pl, err := o.Optimize(context.Background(), stmt, args...)
 	assert.Equal(t, nil, err)
 	queryPlan, ok := pl.(*plan.QueryOnMultiDBPlan)
@@ -92,7 +270,7 @@ func TestOptimizeDeleteOnSingleDB(t *testing.T) {
 	stmt.Accept(&visitor.ParamVisitor{})
 	pl, err := o.Optimize(context.Background(), stmt, args...)
 	assert.Equal(t, nil, err)
-	deletePlan, ok := pl.(*plan.DeleteOnSingleDBPlan)
+	deletePlan, ok := pl.(*plan.DeletePlan)
 	assert.Equal(t, true, ok)
 	assert.Equal(t, 1, len(deletePlan.Tables))
 	assert.Equal(t, "school_0", deletePlan.Database)
@@ -112,7 +290,7 @@ func TestOptimizeDeleteOnMultiDB(t *testing.T) {
 	stmt.Accept(&visitor.ParamVisitor{})
 	pl, err := o.Optimize(context.Background(), stmt, args...)
 	assert.Equal(t, nil, err)
-	deletePlan, ok := pl.(*plan.DeleteOnMultiDBPlan)
+	deletePlan, ok := pl.(*plan.MultiDeletePlan)
 	assert.Equal(t, true, ok)
 	assert.Equal(t, 1, len(deletePlan.Plans[0].Tables))
 	assert.Contains(t, []string{"school_0", "school_1"}, deletePlan.Plans[0].Database)

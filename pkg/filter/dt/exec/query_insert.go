@@ -28,6 +28,7 @@ import (
 	"github.com/cectc/dbpack/pkg/misc"
 	"github.com/cectc/dbpack/pkg/proto"
 	"github.com/cectc/dbpack/pkg/resource"
+	"github.com/cectc/dbpack/pkg/tracing"
 	"github.com/cectc/dbpack/third_party/parser/ast"
 	"github.com/cectc/dbpack/third_party/parser/format"
 )
@@ -59,17 +60,22 @@ func (executor *queryInsertExecutor) AfterImage(ctx context.Context) (*schema.Ta
 		pkValues   []interface{}
 		err        error
 	)
-	pkValues, err = executor.getPKValuesByColumn(ctx)
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.ExecutorFetchAfterImage)
+	defer span.End()
+
+	pkValues, err = executor.getPKValuesByColumn(spanCtx)
 	if err != nil {
+		tracing.RecordErrorSpan(span, err)
 		return nil, err
 	}
-	if executor.getPKIndex(ctx) >= 0 {
-		afterImage, err = executor.buildTableRecords(ctx, pkValues)	//afterImage 是 TableRecords 类型
+	if executor.getPKIndex(spanCtx) >= 0 {
+		afterImage, err = executor.buildTableRecords(spanCtx, pkValues)	//afterImage 是 TableRecords 类型
 	} else {
 		pk, _ := executor.result.LastInsertId()
-		afterImage, err = executor.buildTableRecords(ctx, []interface{}{pk})
+		afterImage, err = executor.buildTableRecords(spanCtx, []interface{}{pk})
 	}
 	if err != nil {
+		tracing.RecordErrorSpan(span, err)
 		return nil, err
 	}
 	return afterImage, nil
@@ -82,7 +88,7 @@ func (executor *queryInsertExecutor) buildTableRecords(ctx context.Context, pkVa
 	}
 
 	afterImageSql := executor.buildAfterImageSql(tableMeta, pkValues)
-	result, _, err := executor.conn.ExecuteWithWarningCount(afterImageSql, true)
+	result, _, err := executor.conn.ExecuteWithWarningCount(ctx, afterImageSql, true)
 	if err != nil {
 		return nil, err
 	}

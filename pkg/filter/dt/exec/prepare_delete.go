@@ -27,6 +27,7 @@ import (
 	"github.com/cectc/dbpack/pkg/meta"
 	"github.com/cectc/dbpack/pkg/misc"
 	"github.com/cectc/dbpack/pkg/resource"
+	"github.com/cectc/dbpack/pkg/tracing"
 	"github.com/cectc/dbpack/third_party/parser/ast"
 	"github.com/cectc/dbpack/third_party/parser/format"
 )
@@ -49,8 +50,11 @@ func NewPrepareDeleteExecutor(
 }
 
 func (executor *prepareDeleteExecutor) BeforeImage(ctx context.Context) (*schema.TableRecords, error) {
-	tableMeta, err := executor.GetTableMeta(ctx)
+	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.ExecutorFetchBeforeImage)
+	defer span.End()
+	tableMeta, err := executor.GetTableMeta(spanCtx)
 	if err != nil {
+		tracing.RecordErrorSpan(span, err)
 		return nil, err
 	}
 	sql := executor.buildBeforeImageSql(tableMeta)
@@ -62,8 +66,9 @@ func (executor *prepareDeleteExecutor) BeforeImage(ctx context.Context) (*schema
 		args = append(args, executor.args[parameterID])
 	}
 
-	result, _, err := executor.conn.PrepareQueryArgs(sql, args)
+	result, _, err := executor.conn.PrepareQueryArgs(spanCtx, sql, args)
 	if err != nil {
+		tracing.RecordErrorSpan(span, err)
 		return nil, err
 	}
 	return schema.BuildBinaryRecords(tableMeta, result), nil

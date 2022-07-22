@@ -14,9 +14,8 @@
  * limitations under the License.
  */
 
-package constant
+package uuid
 
-const (
-	ConfigPathKey      = "config"
-	TransactionTimeout = "transaction-timeout"
-)
+type Generator interface {
+	NextID() (int64, error)
+}

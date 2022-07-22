@@ -160,14 +160,6 @@ var (
 				}
 			}
 
-			//当进程收到 SIGINT 或 SIGTERM 信号时，根据 termination_drain_duration 配置（sample里没有），晚一点退出。如果连续2次收到，就直接退出
-			tracingMgr, err := tracing.NewTracer(Version, "console")
-			if err != nil {
-				log.Fatalf("could not setup tracing manager: %s", err.Error())
-			}
-			if err != nil {
-				log.Fatalf("could not setup tracing exporter: %s", err.Error())
-			}
 			ctx, cancel := context.WithCancel(context.Background())
 			c := make(chan os.Signal, 2)
 			signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -180,7 +172,6 @@ var (
 					cancel()
 				}()
 				<-c
-				_ = tracingMgr.Shutdown(ctx)
 				os.Exit(1) // second signal. Exit directly.
 			}()
 
@@ -198,9 +189,13 @@ var (
 			if lisErr != nil {
 				log.Fatalf("unable init metrics server: %+v", lisErr)
 			}
+
 			//启动 prometheus 用来监控的http服务
 			go initServer(ctx, lis)
 
+			if conf.Trace != nil {
+				go initTracing(ctx, conf.Trace.JaegerEndpoint)
+			}
 			//启动listener
 			dbpack.Start(ctx)
 		},
@@ -232,6 +227,18 @@ func initServer(ctx context.Context, lis net.Listener) {
 		return
 	}
 	log.Infof("start api server :  %s", lis.Addr())
+}
+
+func initTracing(ctx context.Context, jaegerEndpoint string) {
+	traceCtl, err := tracing.NewTracer(Version, jaegerEndpoint)
+	if err != nil {
+		log.Fatalf("could not setup tracing manager: %s", err.Error())
+	}
+
+	go func() {
+		<-ctx.Done()
+		traceCtl.Shutdown(ctx)
+	}()
 }
 
 //func initHolmes() *holmes.Holmes {
