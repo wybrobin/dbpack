@@ -97,3 +97,31 @@
 
 * refactor: AuditLog filter PreHandle support more stmtnode type ([198](https://github.com/CECTC/dbpack/pull/198)) ([bb408a5](https://github.com/CECTC/dbpack/commit/bb408a5f7f1f22e5c5a5927e24b0f0316e0b6e12))
 * refactor: support manipulating the same data in different transaction… ([199](https://github.com/CECTC/dbpack/issues/199)) ([040b4d1](https://github.com/CECTC/dbpack/commit/040b4d14968ab96c5933fc6dad5968668c151e45))
+
+## v0.3.0
+
+### Features
+* add more trace span and integrate with jaeger ([177](https://github.com/CECTC/dbpack/pull/177)) ([d703959](https://github.com/CECTC/dbpack/commit/d70395948677b41759e795be60eb93fcb5dc7f74))
+* add trace for BackendConnection ([204](https://github.com/CECTC/dbpack/pull/204)) ([36b3894](https://github.com/CECTC/dbpack/commit/36b38940539e8d14a8550bd1d08695591cd9c491))
+* support column encryption ([24](https://github.com/CECTC/dbpack/issues/24)) ([946c190](https://github.com/CECTC/dbpack/commit/946c19013c4030f31fb2afecae7772c8546a5a01))
+
+### Bug Fixes
+
+* fix: construct a TraceContext with the correct traceparent ([203](https://github.com/CECTC/dbpack/pull/203)) ([3ecb2cc](https://github.com/CECTC/dbpack/commit/3ecb2cc3dfcf164f68c0cadd2ea6fe73ed49ceff))
+
+## v0.3.1
+
+### Features
+
+* feature: support gin middleware and grpc interceptor ([212](https://github.com/CECTC/dbpack/issues/212)) ([a74d1d2](https://github.com/CECTC/dbpack/commit/a74d1d201457bc394bdbf0364cb25657fca3e0e2))
+
+## v0.3.1
+
+### Features
+
+* feature: support customize request buffer size for http request ([218](https://github.com/CECTC/dbpack/issues/218)) ([593fd25](https://github.com/CECTC/dbpack/commit/593fd25981a28ce9c83ec49a6a1556e9961d49fe))
+
+### Changes
+
+* chore: print ping failed err ([216](https://github.com/CECTC/dbpack/pull/216)) ([852a0f2](https://github.com/CECTC/dbpack/commit/852a0f21f76a270c4d5e8eba60e7c155f0f8edaa))
+

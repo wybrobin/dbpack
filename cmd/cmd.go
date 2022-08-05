@@ -34,10 +34,10 @@ import (
 	"github.com/cectc/dbpack/pkg/constant"
 	"github.com/cectc/dbpack/pkg/driver"
 	"github.com/cectc/dbpack/pkg/dt"
-	"github.com/cectc/dbpack/pkg/dt/storage/etcd"
 	"github.com/cectc/dbpack/pkg/executor"
 	"github.com/cectc/dbpack/pkg/filter"
 	_ "github.com/cectc/dbpack/pkg/filter/audit_log"
+	_ "github.com/cectc/dbpack/pkg/filter/crypto"
 	_ "github.com/cectc/dbpack/pkg/filter/dt"
 	_ "github.com/cectc/dbpack/pkg/filter/metrics"
 	dbpackHttp "github.com/cectc/dbpack/pkg/http"
@@ -56,7 +56,7 @@ func main() {
 }
 
 var (
-	Version               = "0.1.0"
+	Version               = "0.3.2"
 	defaultHTTPListenPort = 18888
 	appName               = "dbpack"
 
@@ -128,8 +128,7 @@ var (
 			//初始化分布式事务，主要是连接etcd。当多进程的时候，在共用一个appid的进程中，使用etcd选取出一个主进程，运行一些全局任务
 			if conf.DistributedTransaction != nil {
 				dbpackHttp.DistributedTransactionEnabled = true
-				driver := etcd.NewEtcdStore(conf.DistributedTransaction.EtcdConfig)
-				dt.InitDistributedTransactionManager(conf.DistributedTransaction, driver)
+				dt.InitDistributedTransactionManager(conf.DistributedTransaction)
 			}
 
 			dbpackHttp.Listeners = conf.Listeners

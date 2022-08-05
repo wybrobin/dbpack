@@ -19,6 +19,7 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 
 	"github.com/pkg/errors"
@@ -30,6 +31,7 @@ import (
 	"github.com/cectc/dbpack/pkg/resource"
 	"github.com/cectc/dbpack/pkg/tracing"
 	"github.com/cectc/dbpack/third_party/parser/ast"
+	"github.com/cectc/dbpack/third_party/parser/format"
 )
 
 type SingleDBExecutor struct {
@@ -123,21 +125,46 @@ func (executor *SingleDBExecutor) ExecuteFieldList(ctx context.Context, table, w
 }
 
 //START TRANSACTION、COMMIT
-func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql string) (proto.Result, uint16, error) {
-	var (
-		db     proto.DB
-		tx     proto.Tx
-		result proto.Result
-		err    error
-	)
+func (executor *SingleDBExecutor) ExecutorComQuery(
+	ctx context.Context, sqlText string) (result proto.Result, warns uint16, err error) {
 	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.SDBComQuery)
 	defer span.End()
+
+	if err = executor.doPreFilter(spanCtx); err != nil {
+		return nil, 0, err
+	}
+	defer func() {
+		if err == nil {
+			result, err = decodeTextResult(result)
+			if err != nil {
+				span.RecordError(err)
+				return
+			}
+			err = executor.doPostFilter(spanCtx, result)
+		} else {
+			span.RecordError(err)
+		}
+	}()
+
+	var (
+		db proto.DB
+		tx proto.Tx
+		sb strings.Builder
+	)
 
 	connectionID := proto.ConnectionID(spanCtx)
 	queryStmt := proto.QueryStmt(spanCtx)
 	if queryStmt == nil {
 		return nil, 0, errors.New("query stmt should not be nil")
 	}
+	if err := queryStmt.Restore(format.NewRestoreCtx(
+		format.DefaultRestoreFlags|
+			format.RestoreStringWithoutDefaultCharset, &sb)); err != nil {
+		return nil, 0, err
+	}
+	sql := sb.String()
+	spanCtx = proto.WithSqlText(spanCtx, sql)
+
 	log.Debugf("connectionID: %d, query: %s", connectionID, sql)
 	db = resource.GetDBManager().GetDB(executor.dataSource)
 	switch stmt := queryStmt.(type) {
@@ -154,9 +181,9 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 			txi, ok := executor.localTransactionMap.Load(connectionID)
 			if ok {
 				tx = txi.(proto.Tx)
-				return tx.Query(spanCtx, sql)
+				return tx.Query(spanCtx, sqlText)
 			}
-			return db.Query(spanCtx, sql)
+			return db.Query(spanCtx, sqlText)
 		}
 	case *ast.BeginStmt:
 		// TODO add metrics
@@ -200,12 +227,28 @@ func (executor *SingleDBExecutor) ExecutorComQuery(ctx context.Context, sql stri
 	}
 }
 
-//insert, update
-func (executor *SingleDBExecutor) ExecutorComStmtExecute(ctx context.Context, stmt *proto.Stmt) (proto.Result, uint16, error) {
+func (executor *SingleDBExecutor) ExecutorComStmtExecute(
+	ctx context.Context, stmt *proto.Stmt) (result proto.Result, warns uint16, err error) {
 	spanCtx, span := tracing.GetTraceSpan(ctx, tracing.SDBComStmtExecute)
 	defer span.End()
 
-	connectionID := proto.ConnectionID(spanCtx)
+	if err = executor.doPreFilter(spanCtx); err != nil {
+		return nil, 0, err
+	}
+	defer func() {
+		if err == nil {
+			result, err = decodeBinaryResult(result)
+			if err != nil {
+				span.RecordError(err)
+				return
+			}
+			err = executor.doPostFilter(spanCtx, result)
+		} else {
+			span.RecordError(err)
+		}
+	}()
+
+	connectionID := proto.ConnectionID(ctx)
 	log.Debugf("connectionID: %d, prepare: %s", connectionID, stmt.SqlText)
 	txi, ok := executor.localTransactionMap.Load(connectionID)	//查看当前连接是否在事务里
 	if ok {//如果在事务里，则以事务的方式执行操作
